@@ -1,0 +1,31 @@
+{
+  "name": "appliqation-autopilot",
+  "version": "0.1.0",
+  "description": "An agentic orchestrator that decides, per test case, whether to run autonomous testing, generate new automation, or raise a pull request for it — reasoning over real signal (current pass/fail state, flakiness, linked defects, coverage priority), not a fixed script. Reasoning lives entirely in this repo, not a private server.",
+  "type": "module",
+  "bin": {
+    "appliqation-autopilot": "./dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@appliqation/agent-core": "file:../appliqation-agent-core",
+    "commander": "^13.1.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.7"
+  }
+}
