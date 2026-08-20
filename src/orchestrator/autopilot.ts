@@ -6,7 +6,7 @@
 // override), so runLoop() is used directly rather than runWorkflow()'s
 // appq-fetch indirection, which has nothing to fetch here.
 
-import { runLoop, fetchAppqToolDefs, createGatedAppqDispatcher } from '@appliqation/agent-core';
+import { runLoop, fetchAppqToolDefs, createGatedAppqDispatcher, createReadOnlyProjectContextDispatcher, PROJECT_CONTEXT_TOOL } from '@appliqation/agent-core';
 import type { McpClient, ProviderAdapter, RunBudget, ToolDispatcher, LoopResult } from '@appliqation/agent-core';
 import { READONLY_CONTEXT_TOOLS } from '../tools/safety.js';
 import { metaToolDefs, createMetaToolDispatch } from '../tools/metaTools.js';
@@ -27,8 +27,13 @@ export interface AutopilotOptions {
 }
 
 export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
-  const appqToolDefs = await fetchAppqToolDefs(opts.client, READONLY_CONTEXT_TOOLS);
-  const gatedAppq = createGatedAppqDispatcher(opts.client, READONLY_CONTEXT_TOOLS);
+  const contextToolAllowlist = new Set([...READONLY_CONTEXT_TOOLS, PROJECT_CONTEXT_TOOL]);
+  const appqToolDefs = await fetchAppqToolDefs(opts.client, contextToolAllowlist);
+  // Argument-level gate applied outermost — see @appliqation/agent-core's tools/projectContext.ts —
+  // so a write attempt is refused before anything else decides what to do
+  // with the call, same ordering reasoning as judgeTc.ts's browser-label
+  // correction sitting outside its dry-run interceptor.
+  const gatedAppq = createReadOnlyProjectContextDispatcher(createGatedAppqDispatcher(opts.client, contextToolAllowlist));
   const metaDispatch = createMetaToolDispatch(opts.metaTools);
   const metaDefs = metaToolDefs(opts.metaTools);
   const metaNames = new Set(metaDefs.map((t) => t.name));

@@ -7,10 +7,11 @@
 
 import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
-import { createMcpClient, createAnthropicAdapter, createOpenAiAdapter } from '@appliqation/agent-core';
-import type { ProviderAdapter } from '@appliqation/agent-core';
+import { createMcpClient, createAnthropicAdapter, createOpenAiAdapter, createUsageAccumulator } from '@appliqation/agent-core';
+import type { ProviderAdapter, LoopResult } from '@appliqation/agent-core';
 import { config, resolveProvider, resolveModel } from '../config/env.js';
 import { autopilot } from '../orchestrator/autopilot.js';
+import { recordAutopilotRun } from './audit.js';
 
 function buildAdapter(): ProviderAdapter {
   const provider = resolveProvider();
@@ -93,24 +94,51 @@ program
         console.error('[setup] run_pr_raise is not authorized (pass --allow-pr to enable it).');
       }
 
-      const result = await autopilot({
-        client,
-        adapter,
-        testCaseUuid: opts.testCaseUuid,
-        environment: opts.environment,
-        repoPath: opts.repoPath,
-        budget,
-        metaTools: {
-          autotestCmd: config.autotestCmd,
-          scriptgenCmd: config.scriptgenCmd,
-          prRaiseCmd: config.prRaiseCmd,
-          defectFixCmd: config.defectFixCmd,
-          commandTimeoutMs: config.commandTimeoutMs,
+      const startedAt = Date.now();
+      const usage = createUsageAccumulator();
+      const baseLog = logEvent('');
+      let result: LoopResult | undefined;
+      try {
+        result = await autopilot({
+          client,
+          adapter,
+          testCaseUuid: opts.testCaseUuid,
+          environment: opts.environment,
+          repoPath: opts.repoPath,
+          budget,
+          metaTools: {
+            autotestCmd: config.autotestCmd,
+            scriptgenCmd: config.scriptgenCmd,
+            prRaiseCmd: config.prRaiseCmd,
+            defectFixCmd: config.defectFixCmd,
+            explorerCmd: config.explorerCmd,
+            commandTimeoutMs: config.commandTimeoutMs,
+            allowPr,
+          },
+          systemPromptOverride,
+          onEvent: (e) => {
+            baseLog(e);
+            if (e.type === 'usage') usage.onUsage(e.detail as { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number });
+          },
+        });
+      } finally {
+        // Audit write happens whether the run succeeded or threw — see
+        // @appliqation/agent-core's audit/sink.ts: safeRecord() (used
+        // inside recordAutopilotRun) never lets a failed/unreachable audit
+        // sink affect this process's real outcome.
+        await recordAutopilotRun({
+          sink: config.auditSink,
+          startedAt,
+          endedAt: Date.now(),
+          model: resolveModel(),
+          usage: usage.totals(),
+          testCaseUuid: opts.testCaseUuid,
+          environment: opts.environment,
+          repoPath: opts.repoPath,
           allowPr,
-        },
-        systemPromptOverride,
-        onEvent: logEvent(''),
-      });
+          result,
+        });
+      }
 
       if (json) {
         console.log(JSON.stringify({ report: result.report, turns: result.turns, budgetExceeded: result.budgetExceeded }, null, 2));

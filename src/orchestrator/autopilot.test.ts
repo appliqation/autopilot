@@ -5,11 +5,18 @@ const { mockFetchAppqToolDefs, mockCreateGatedAppqDispatcher, mockRunLoop } = vi
   mockCreateGatedAppqDispatcher: vi.fn(),
   mockRunLoop: vi.fn(),
 }));
-vi.mock('@appliqation/agent-core', () => ({
-  runLoop: mockRunLoop,
-  fetchAppqToolDefs: mockFetchAppqToolDefs,
-  createGatedAppqDispatcher: mockCreateGatedAppqDispatcher,
-}));
+vi.mock('@appliqation/agent-core', async (importOriginal) => {
+  // createReadOnlyProjectContextDispatcher/PROJECT_CONTEXT_TOOL come through
+  // as the real implementation — this suite verifies actual gating behavior
+  // (write blocked, read passed through), not just that it was called.
+  const actual = await importOriginal<typeof import('@appliqation/agent-core')>();
+  return {
+    ...actual,
+    runLoop: mockRunLoop,
+    fetchAppqToolDefs: mockFetchAppqToolDefs,
+    createGatedAppqDispatcher: mockCreateGatedAppqDispatcher,
+  };
+});
 
 const { mockMetaDispatch, mockMetaToolDefs } = vi.hoisted(() => ({
   mockMetaDispatch: vi.fn(),
@@ -48,6 +55,7 @@ function baseOpts() {
       scriptgenCmd: 'appliqation-scriptgen',
       prRaiseCmd: 'appliqation-pr-raise',
       defectFixCmd: 'appliqation-defect-fix',
+      explorerCmd: 'appliqation-explorer',
       commandTimeoutMs: 30_000,
       allowPr: false,
     },
@@ -111,6 +119,35 @@ describe('autopilot', () => {
     const gatedFn = mockCreateGatedAppqDispatcher.mock.results[0].value;
     await dispatch('get_scenario', { scenario_id: 2424 });
     expect(gatedFn).toHaveBeenCalledWith('get_scenario', { scenario_id: 2424 });
+  });
+
+  it('offers enrich_project_context to the model, in the same allowlist used for context tools', async () => {
+    await autopilot(baseOpts());
+    const allowlistArg = mockFetchAppqToolDefs.mock.calls[0][1] as Set<string>;
+    expect(allowlistArg.has('enrich_project_context')).toBe(true);
+  });
+
+  it('lets an enrich_project_context action=read call reach the real gated appq dispatcher', async () => {
+    const gatedInner = vi.fn().mockResolvedValue({ ok: true, text: 'project context' });
+    mockCreateGatedAppqDispatcher.mockReturnValue(gatedInner);
+    await autopilot(baseOpts());
+    const dispatch = mockRunLoop.mock.calls[0][0].dispatch;
+
+    const result = await dispatch('enrich_project_context', { project_id: 1349, action: 'read' });
+    expect(gatedInner).toHaveBeenCalledWith('enrich_project_context', { project_id: 1349, action: 'read' });
+    expect(result.text).toBe('project context');
+  });
+
+  it('blocks an enrich_project_context action=write call before it ever reaches the gated appq dispatcher', async () => {
+    const gatedInner = vi.fn().mockResolvedValue({ ok: true, text: 'would have written' });
+    mockCreateGatedAppqDispatcher.mockReturnValue(gatedInner);
+    await autopilot(baseOpts());
+    const dispatch = mockRunLoop.mock.calls[0][0].dispatch;
+
+    const result = await dispatch('enrich_project_context', { project_id: 1349, action: 'write', knowledge: {} });
+    expect(gatedInner).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.text).toMatch(/read-only/);
   });
 
   it('passes the given budget through unchanged', async () => {

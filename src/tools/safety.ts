@@ -22,3 +22,13 @@ export const READONLY_CONTEXT_TOOLS = new Set([
   'search_tests',
   'get_project_settings',
 ]);
+
+// enrich_project_context is a SINGLE MCP tool with both action=read and
+// action=write modes — not two separate tools. Kept out of
+// READONLY_CONTEXT_TOOLS on purpose: that set's whole guarantee is "no
+// write capability under any argument," and folding this in would quietly
+// weaken that guarantee for every tool in it, not just this one.
+// PROJECT_CONTEXT_TOOL itself, and the argument-level gate that enforces
+// read-only access to it, now live in @appliqation/agent-core's
+// tools/projectContext.ts — shared with every other headless agent that
+// needs the identical guarantee, not just this one.

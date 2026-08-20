@@ -23,6 +23,7 @@ const baseCfg = {
   scriptgenCmd: 'appliqation-scriptgen',
   prRaiseCmd: 'appliqation-pr-raise',
   defectFixCmd: 'appliqation-defect-fix',
+  explorerCmd: 'appliqation-explorer',
   commandTimeoutMs: 30_000,
   allowPr: false,
 };
@@ -46,16 +47,28 @@ describe('parseCommand', () => {
 });
 
 describe('metaToolDefs', () => {
-  it('always offers run_judge, run_generate, and run_defect_fix', () => {
+  it('always offers run_judge, run_generate, run_defect_fix, and run_explore', () => {
     const names = metaToolDefs(baseCfg).map((t) => t.name);
     expect(names).toContain('run_judge');
     expect(names).toContain('run_generate');
     expect(names).toContain('run_defect_fix');
+    expect(names).toContain('run_explore');
   });
 
   it('run_defect_fix is offered regardless of allowPr — it never touches git/GitHub', () => {
     expect(metaToolDefs({ ...baseCfg, allowPr: false }).map((t) => t.name)).toContain('run_defect_fix');
     expect(metaToolDefs({ ...baseCfg, allowPr: true }).map((t) => t.name)).toContain('run_defect_fix');
+  });
+
+  it('run_explore is offered regardless of allowPr — it never touches git/GitHub either', () => {
+    expect(metaToolDefs({ ...baseCfg, allowPr: false }).map((t) => t.name)).toContain('run_explore');
+    expect(metaToolDefs({ ...baseCfg, allowPr: true }).map((t) => t.name)).toContain('run_explore');
+  });
+
+  it('run_explore requires prompt in its schema, with no dry_run param at all', () => {
+    const def = metaToolDefs(baseCfg).find((t) => t.name === 'run_explore')!;
+    expect((def.inputSchema as { required: string[] }).required).toEqual(['prompt']);
+    expect((def.inputSchema as { properties: Record<string, unknown> }).properties).not.toHaveProperty('dry_run');
   });
 
   it('run_defect_fix requires test_instruction in its schema', () => {
@@ -197,6 +210,51 @@ describe('createMetaToolDispatch', () => {
       const result = await dispatch('run_defect_fix', { defect_id: 'd-1', repo_path: '/repo', test_instruction: 'x' });
       expect(result.ok).toBe(false);
       expect(JSON.parse(result.text)).toMatchObject({ defectId: 'd-1', verified: false });
+    });
+  });
+
+  describe('run_explore', () => {
+    it('spawns the configured explorer command with explore + args + --json', async () => {
+      mockSuccess('{"turns":5,"budgetExceeded":false}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_explore', { prompt: 'Explore the signup flow.' });
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-explorer',
+        ['explore', '--prompt', 'Explore the signup flow.', '--json'],
+        expect.anything(),
+        expect.any(Function),
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it('includes --project-id/--site-url only when given', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      await dispatch('run_explore', { prompt: 'Explore the signup flow.', project_id: 1349, site_url: 'https://stage.example.com' });
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-explorer',
+        [
+          'explore',
+          '--prompt',
+          'Explore the signup flow.',
+          '--project-id',
+          '1349',
+          '--site-url',
+          'https://stage.example.com',
+          '--json',
+        ],
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+
+    it('recovers the real --json summary from stdout even when the CLI exits non-zero (budget exceeded)', async () => {
+      mockFailure(1, '{"turns":80,"budgetExceeded":true}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_explore', { prompt: 'Explore the signup flow.' });
+      expect(result.ok).toBe(false);
+      expect(JSON.parse(result.text)).toMatchObject({ budgetExceeded: true });
     });
   });
 

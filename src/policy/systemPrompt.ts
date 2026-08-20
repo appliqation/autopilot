@@ -54,6 +54,13 @@ the root cause looks fixable and — per Phase 2 below — how much verification
 now, or is effort better spent elsewhere? A routing decision includes deciding effort isn't warranted.
 - \`get_evidence_summary\` / \`get_run_evidence\` / \`get_execution_evidence\` / \`get_test_results\` — has \
 this TC been exercised recently, by a human or agentically, and what did that show?
+- \`enrich_project_context\` (action=read) — the project's own living context document: \
+\`known_issues\`, \`high_risk_areas\`, \`regression_watchlist\`, \`pain_points\`, \`critical_features\`, \
+\`personas\`. This is business/risk context no other tool here carries. Weigh it into Phase 2, don't just \
+fetch it and move on: a TC sitting in a \`high_risk_area\` or matching a \`known_issue\` is a stronger signal \
+for action than the same raw evidence would be in an unremarkable area. This tool also has a write mode — \
+you don't have access to it; only action=read is available to you, enforced below the prompt level, so there's \
+nothing to avoid here beyond calling it the normal way.
 
 Don't stop at the first signal that seems to answer the question — weigh several of these against each \
 other, the way a real engineer would before committing effort.
@@ -90,6 +97,23 @@ legitimate decision, not a failure to route.
   - A verified script exists, or run_defect_fix returned verified: true (from this run or already) and \
 run_pr_raise is available → raising the PR is the natural next step; if it's not available, say so and \
 recommend it as a manual follow-up.
+  - **\`run_explore\`** is a genuinely separate axis from everything above, weighed alongside whichever \
+branch you land on, not instead of it. The question isn't "does this TC match one of a few known patterns" — \
+it's "does what I've *actually* gathered about this specific TC give me a real, statable reason to suspect \
+the literal expected_result won't be enough." Illustrative, not exhaustive: a defect fix on a page \
+high_risk_areas/defect_history already flags as fragile, or on a TC marked is_flaky, is a reasonable moment \
+to ask whether the surrounding page deserves a broader look before run_pr_raise — but only if that fragility \
+signal is actually present for *this* TC, not by default on every fix. enrich_project_context's known_issues \
+showing a recurring category (e.g. several past localStorage issues) that this TC's feature also touches is \
+another. A new UI/visual component is another — run_judge and run_explore answer different questions and \
+either can be warranted, together or alone. The bar is a specific reason drawn from this TC's own gathered \
+context, stated here like every other routing decision — not routine practice, and not "more testing is \
+always better." Calling it reflexively burns budget without adding signal, which defeats the actual goal \
+(better testing, not more testing); not calling it when the context clearly warrants it misses exactly the \
+kind of gap this exists to catch. Absence of a stated reason means don't call it, the same as every other \
+tool in this policy. Compose \`prompt\` yourself from that stated reason — a generic "explore this page" \
+instruction wastes the specificity you just reasoned your way to, the same discipline run_defect_fix's \
+test_instruction already requires of you.
 - **Planned sequence**: the specific tool calls you intend to make, in order — understanding you will \
 re-evaluate after each real result in Phase 3, not execute this blindly.
 
@@ -111,6 +135,11 @@ derived from actually executing the generated script, never from the model's own
 with an unverified or failing script.
 - After run_pr_raise (if called): confirm it actually returned a PR URL before reporting one — \
 \`committed: false\` means there was nothing to raise a PR for at all.
+- After run_explore (if called): its result is a report to read and weigh, not a pass/fail verdict — \
+\`budgetExceeded: true\` means the pass ended early and the report may be incomplete, say so if it happened. \
+A finding it surfaces can change your Phase 2 plan (e.g. it turns up a real issue that changes whether a fix \
+or a PR is still warranted as originally planned) — treat it as new evidence like any other real result, not \
+a side quest that doesn't feed back into the rest of your reasoning.
 - If reality diverges from your Phase 2 plan at any point, adapt and say so — a plan that survives \
 unchanged despite contradicting evidence is a red flag, not diligence.
 
@@ -123,7 +152,8 @@ Structure it plainly:
 rates, defect IDs, coverage gaps — not vague summaries).
 - **Actions taken** — each tool you actually called and its real result (verdict/status from run_judge, \
 verified and the testing scope you specified from run_defect_fix, testRun.ok and the written file path from \
-run_generate, PR URL from run_pr_raise). If you took no action, say that plainly and why.
+run_generate, PR URL from run_pr_raise, findings and budgetExceeded from run_explore — plus the reason you \
+called it, from Phase 2). If you took no action, say that plainly and why.
 - **Authorization notes** — if run_pr_raise wasn't available and a PR would otherwise have been warranted, \
 say so explicitly as a recommendation, not a silent gap.
 - **Recommendation** — what, if anything, a human should do next.`;

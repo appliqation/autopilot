@@ -1,5 +1,6 @@
-// Wraps the four sibling agents (appliqation-autotest, appliqation-scriptgen,
-// appliqation-defect-fix, appliqation-pr-raise) as ordinary LLM-callable tools. Never a filesystem or
+// Wraps the five sibling agents (appliqation-autotest, appliqation-scriptgen,
+// appliqation-defect-fix, appliqation-pr-raise, appliqation-explorer) as ordinary
+// LLM-callable tools. Never a filesystem or
 // private-npm dependency — each is invoked as a configured command string
 // (see src/config/env.ts), spawned via child_process.execFile with an
 // explicit argv array (never a shell string), consuming the CLI's own
@@ -54,6 +55,7 @@ export interface MetaToolsConfig {
   scriptgenCmd: string;
   prRaiseCmd: string;
   defectFixCmd: string;
+  explorerCmd: string;
   commandTimeoutMs: number;
   /** Whether run_pr_raise is even offered — see metaToolDefs(). */
   allowPr: boolean;
@@ -124,6 +126,25 @@ export function metaToolDefs(cfg: MetaToolsConfig): LlmToolDef[] {
           },
         },
         required: ['defect_id', 'repo_path', 'test_instruction'],
+      },
+    },
+    {
+      name: 'run_explore',
+      description:
+        'Run a headless exploratory-QA pass (appq:runman) against a live target — open-ended senior-QA ' +
+        'heuristics, accessibility, security/network/caching probes, the kind of coverage a scripted test case ' +
+        'never checks for. Not a routine step: call it only when your own gathered context gives you a real, ' +
+        'statable reason to suspect the literal test case in front of you is not enough on its own (see the ' +
+        'policy\'s Phase 2 for how to judge that). prompt should state the exploration intent in plain English ' +
+        '— what you actually want covered, not a generic instruction.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Plain-English exploration intent — what to cover and why, from your own gathered context.' },
+          project_id: { type: 'integer' },
+          site_url: { type: 'string' },
+        },
+        required: ['prompt'],
       },
     },
   ];
@@ -197,6 +218,12 @@ export function createMetaToolDispatch(cfg: MetaToolsConfig) {
         ];
         if (args.dry_run) cliArgs.push('--dry-run');
         return runCliJson(cfg.defectFixCmd, 'fix', cliArgs, cfg.commandTimeoutMs);
+      }
+      case 'run_explore': {
+        const cliArgs = ['--prompt', String(args.prompt)];
+        if (args.project_id !== undefined) cliArgs.push('--project-id', String(args.project_id));
+        if (args.site_url) cliArgs.push('--site-url', String(args.site_url));
+        return runCliJson(cfg.explorerCmd, 'explore', cliArgs, cfg.commandTimeoutMs);
       }
       case 'run_pr_raise': {
         if (!cfg.allowPr) {

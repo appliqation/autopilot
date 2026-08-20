@@ -11,7 +11,7 @@ about what's actually warranted the way a senior QA engineer scoping their day w
 a plan, and executes it — checking real results after every action and adapting when reality
 disagrees with the plan, rather than committing blindly upfront.
 
-It orchestrates four independent, single-purpose agents as ordinary tools it can call. None
+It orchestrates five independent, single-purpose agents as ordinary tools it can call. None
 of them know Autopilot exists. Each does one thing well and can be scripted directly if you
 want deterministic control instead. Autopilot is the layer above them that decides *when* and
 *whether* to use each one.
@@ -24,8 +24,9 @@ want deterministic control instead. Autopilot is the layer above them that decid
 | **Defect-Fix** | Loads full defect context, locates and applies a real code fix, syncs the scenario, verifies with a real Playwright run. | [`appliqation-defect-fix`](https://github.com/appliqation/appliqation-defect-fix) |
 | **Scriptgen** | Drafts a Playwright script for an untested-but-passing test case, iterating against real runs until genuinely green. | [`appliqation-scriptgen`](https://github.com/appliqation/appliqation-scriptgen) |
 | **PR-Raise** | Fully mechanical, no LLM: commits whatever's already changed, pushes, opens or reuses a pull request. | [`appliqation-pr-raise`](https://github.com/appliqation/appliqation-pr-raise) |
+| **Explorer** | Open-ended exploratory QA — a senior-QA heuristics pass plus security/network/caching/mobile probes, headlessly, the coverage a scripted test case never checks for. | [`appliqation-explorer`](https://github.com/appliqation/appliqation-explorer) |
 
-All four share [`@appliqation/agent-core`](https://github.com/appliqation/appliqation-agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
+All five share [`@appliqation/agent-core`](https://github.com/appliqation/appliqation-agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
 
 ## Why this is different from "wire an LLM to some CLIs"
 
@@ -41,7 +42,7 @@ All four share [`@appliqation/agent-core`](https://github.com/appliqation/appliq
   actually-executed Playwright run, not the model's own claim about it. `run_judge`'s status is
   polled from Appliqation's own authoritative run record, not parsed out of report prose. If
   Autopilot says a test passes, it's because it watched that happen.
-- **The reasoning lives here, in the open — not behind a private API.** The four sibling
+- **The reasoning lives here, in the open — not behind a private API.** The five sibling
   agents are genuinely self-contained; the *judgment* about how to combine them is this
   repo's own code, fully readable, forkable, and swappable (see
   [Customizing the policy](#customizing-the-policy)). Nothing about how this agent thinks is
@@ -65,21 +66,23 @@ flowchart TB
         Policy -.drives.-> Loop
     end
 
-    Ctx["read-only Appliqation context:<br/>get_scenario, get_failure_patterns,<br/>get_defect_context, get_coverage_analysis,<br/>get_automation_readiness, ..."]
+    Ctx["read-only Appliqation context:<br/>get_scenario, get_failure_patterns,<br/>get_defect_context, get_coverage_analysis,<br/>get_automation_readiness, enrich_project_context<br/>(read-only — action=write is refused), ..."]
 
     Ctx --> Loop
     Loop -->|run_judge| Autotest[appliqation-autotest]
     Loop -->|run_defect_fix| DefectFix[appliqation-defect-fix]
     Loop -->|run_generate| Scriptgen[appliqation-scriptgen]
     Loop -->|"run_pr_raise<br/>(only if --allow-pr)"| PrRaise[appliqation-pr-raise]
+    Loop -->|"run_explore<br/>(when Phase 2 states a real reason)"| Explorer[appliqation-explorer]
 
     Autotest -->|real polled verdict| Loop
     DefectFix -->|"verified: true/false"| Loop
     Scriptgen -->|"testRun.ok: true/false"| Loop
     PrRaise -->|PR URL or committed: false| Loop
+    Explorer -->|"findings report + budgetExceeded"| Loop
 ```
 
-- **Context tools** are ordinary read-only Appliqation MCP tools — the same signal a human QA lead would look at before deciding where to spend effort.
+- **Context tools** are ordinary read-only Appliqation MCP tools — the same signal a human QA lead would look at before deciding where to spend effort. This includes the project's own living context document (`enrich_project_context`, action=read) — known issues, high-risk areas, regression watchlist, pain points, personas — so a TC in a known-risky area gets weighed differently than the same raw evidence somewhere unremarkable. The tool also has a write mode; autopilot can only ever read it — see [Safety](#safety).
 - **Action tools** each spawn the corresponding sibling agent's CLI as a real subprocess with `--json`, and hand the model back the exact, real structured result — never a summary of one.
 - **The policy** (`src/policy/systemPrompt.ts`) is the one piece of genuine "brain" — a detailed, phase-based methodology for gathering context, forming a plan, executing it adaptively, and reporting honestly. It's a plain string. Read it, fork it, replace it.
 
@@ -185,10 +188,11 @@ cp .env.example .env   # fill in APPQ_API_KEY and one LLM provider key
 npm run build
 ```
 
-You'll also need the four sibling agents reachable — either installed globally once
+You'll also need the five sibling agents reachable — either installed globally once
 they're published (`npm install -g appliqation-autotest appliqation-defect-fix
-appliqation-scriptgen appliqation-pr-raise`), or point at local builds via `AUTOTEST_CMD` /
-`DEFECT_FIX_CMD` / `SCRIPTGEN_CMD` / `PR_RAISE_CMD` in `.env` (see `.env.example`).
+appliqation-scriptgen appliqation-pr-raise appliqation-explorer`), or point at local builds
+via `AUTOTEST_CMD` / `DEFECT_FIX_CMD` / `SCRIPTGEN_CMD` / `PR_RAISE_CMD` / `EXPLORER_CMD` in
+`.env` (see `.env.example`).
 
 ```bash
 npx appliqation-autopilot run \
@@ -239,13 +243,35 @@ is a complete, independently useful CLI (see [workflow 2](#2-deterministic-ci-pi
   `run_defect_fix`'s `dry_run` argument), no credentials ever flowing through an LLM's own
   context. Autopilot doesn't weaken any of that; it just decides when to invoke it.
 - No credentials of any kind pass through the LLM's context at any point in this repo.
+- `enrich_project_context` is a single Appliqation tool with both `action=read` and
+  `action=write` modes — tool-*name* allowlisting alone can't express "this tool, but
+  only this argument value," so `@appliqation/agent-core`'s `createReadOnlyProjectContextDispatcher`
+  adds an argument-level gate on top: only `action=read` is ever let through, and the
+  check fails closed (a missing or malformed `action` is refused too, not just an
+  explicit `"write"`). Shared with `appliqation-explorer`, which needs the identical
+  guarantee.
+- `appliqation-explorer` is read-only end to end — including on the project context
+  document its own upstream workflow (`appq:runman`) would otherwise write to. When that
+  workflow runs interactively in Claude Code, a human is present at its confirmation gate
+  before anything gets persisted as fact for future passes; a headless `run_explore` call
+  has no equivalent, so it holds the same conservative default as Autopilot itself rather
+  than the permissive one baked into the interactive prompt. See that repo's README for
+  the full reasoning.
 
 ## Configuration
 
 See `.env.example` for the full list. In short: `APPQ_API_KEY` + one LLM provider key are
-required; `AUTOTEST_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/`PR_RAISE_CMD` tell Autopilot how to
-reach the sibling agents; `BUDGET_MAX_*` caps the tool-calling loop; `POLICY_FILE` points at a
-custom policy.
+required; `AUTOTEST_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/`PR_RAISE_CMD`/`EXPLORER_CMD` tell
+Autopilot how to reach the sibling agents; `BUDGET_MAX_*` caps the tool-calling loop;
+`POLICY_FILE` points at a custom policy.
+
+Optionally, `AUDIT_MONGO_URI`/`AUDIT_MONGO_DB`/`AUDIT_MONGO_COLLECTION` or
+`AUDIT_JSONL_PATH` records one audit entry per invocation (token usage, duration, real
+outcome) to a datastore this agent family owns — deliberately not part of Appliqation
+itself, since this is a parallel system that uses it, not a feature of it. Every sibling
+agent in the family writes to the same shape; [`appliqation-dashboard`](https://github.com/appliqation/appliqation-dashboard)
+reads it back as an aggregated report. Entirely opt-in — nothing is recorded unless one
+of these is set, and a write failure never affects a real run's outcome.
 
 ## Development
 

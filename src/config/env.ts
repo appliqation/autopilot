@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from '@appliqation/agent-core/providers';
 import { required, optional } from '@appliqation/agent-core/config';
+import { resolveAuditSink } from '@appliqation/agent-core/audit';
 
 export const config = {
   appqOrigin: optional('APPQ_ORIGIN') ?? 'https://appq.appliqation.io',
@@ -21,7 +22,7 @@ export const config = {
     maxMillis: Number(optional('BUDGET_MAX_MILLIS') ?? 30 * 60 * 1000),
     maxTurns: Number(optional('BUDGET_MAX_TURNS') ?? 30),
   },
-  // How to invoke the three sibling agents — never a filesystem/private-npm
+  // How to invoke the five sibling agents — never a filesystem/private-npm
   // dependency (this repo is meant to be cloned standalone), just a command
   // string split on whitespace into [command, ...baseArgs]. Defaults assume
   // the real packages are installed and on PATH; override to point at a
@@ -30,9 +31,18 @@ export const config = {
   scriptgenCmd: optional('SCRIPTGEN_CMD') ?? 'appliqation-scriptgen',
   prRaiseCmd: optional('PR_RAISE_CMD') ?? 'appliqation-pr-raise',
   defectFixCmd: optional('DEFECT_FIX_CMD') ?? 'appliqation-defect-fix',
+  explorerCmd: optional('EXPLORER_CMD') ?? 'appliqation-explorer',
   commandTimeoutMs: Number(optional('COMMAND_TIMEOUT_MS') ?? 20 * 60 * 1000),
   // The one real customization point — see src/policy/systemPrompt.ts.
   policyFile: optional('POLICY_FILE'),
+
+  // Observability, entirely opt-in — see @appliqation/agent-core's audit/sink.ts.
+  auditSink: resolveAuditSink({
+    auditMongoUri: optional('AUDIT_MONGO_URI'),
+    auditMongoDb: optional('AUDIT_MONGO_DB'),
+    auditMongoCollection: optional('AUDIT_MONGO_COLLECTION'),
+    auditJsonlPath: optional('AUDIT_JSONL_PATH'),
+  }),
 };
 
 export function resolveProvider(): 'anthropic' | 'openai' {
