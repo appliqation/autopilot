@@ -1,7 +1,7 @@
 {
   "name": "appliqation-autopilot",
   "version": "0.1.0",
-  "description": "An agentic orchestrator that decides, per test case, whether to run autonomous testing, generate new automation, or raise a pull request for it — reasoning over real signal (current pass/fail state, flakiness, linked defects, coverage priority), not a fixed script. Reasoning lives entirely in this repo, not a private server.",
+  "description": "An agentic orchestrator that decides, per test case, whether to run autonomous testing, generate new automation, or raise a pull request for it \u2014 reasoning over real signal (current pass/fail state, flakiness, linked defects, coverage priority), not a fixed script. Reasoning lives entirely in this repo, not a private server.",
   "type": "module",
   "bin": {
     "appliqation-autopilot": "./dist/cli/index.js"
@@ -9,8 +9,13 @@
   "engines": {
     "node": ">=20"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts",
