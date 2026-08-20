@@ -51,11 +51,11 @@ instruction, not just decide whether to call the tool.
   `~/Sites/localhost/appliqation-autotest/` etc. still works once the sibling packages
   are published to npm (defaults assume they're on PATH) or if the user points the env
   vars at wherever they've built them.
-- **`package.json`'s `@appliqation/agent-core` dependency is currently `file:../appliqation-agent-core`
-  because that package isn't published yet either — this MUST become a real npm version
-  pin (e.g. `^0.1.0`) before this repo is actually pushed publicly**, or an external
-  clone's `npm install` will fail outright. Flagging this explicitly rather than letting
-  it slip — check this before any real `git push` to a public remote.
+- **`package.json`'s `@appliqation/agent-core` dependency is `^0.1.0`, a real npm version
+  pin** — `@appliqation/agent-core` is now published (npmjs.com/package/@appliqation/agent-core).
+  Was `file:../appliqation-agent-core` until this landed; keep it a real version range
+  going forward, never revert to a `file:` path, or an external clone's `npm install`
+  breaks again.
 - **No secrets, ever.** `.env` is gitignored; `.env.example` documents every var with no
   real values. Nothing in `src/` should reference a real appq origin, API key, or token.
 - **README.md is the primary audience-facing doc, not this file.** Keep this file
