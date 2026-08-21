@@ -181,7 +181,7 @@ npx appliqation-scriptgen generate --test-case-uuid <uuid> --repo-path <path> --
 ## Quick start
 
 ```bash
-npm install -g appliqation-autopilot
+npm install -g @appliqation/autopilot
 ```
 
 You'll also need whichever sibling agents autopilot is allowed to call — install the ones
@@ -189,8 +189,8 @@ you want reachable (see [Workflow options](#workflow-options) above for real com
 you don't need all five for every use case):
 
 ```bash
-npm install -g appliqation-autotest appliqation-defect-fix \
-  appliqation-scriptgen appliqation-pr-raise appliqation-explorer
+npm install -g @appliqation/autotest @appliqation/defect-fix \
+  @appliqation/scriptgen @appliqation/pr-raise @appliqation/explorer
 ```
 
 Each is a plain command name by default (`AUTOTEST_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/
