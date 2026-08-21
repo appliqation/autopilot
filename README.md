@@ -181,21 +181,31 @@ npx appliqation-scriptgen generate --test-case-uuid <uuid> --repo-path <path> --
 ## Quick start
 
 ```bash
-git clone https://github.com/appliqation/appliqation-autopilot.git
-cd appliqation-autopilot
-npm install
-cp .env.example .env   # fill in APPQ_API_KEY and one LLM provider key
-npm run build
+npm install -g appliqation-autopilot
 ```
 
-You'll also need the five sibling agents reachable — either installed globally once
-they're published (`npm install -g appliqation-autotest appliqation-defect-fix
-appliqation-scriptgen appliqation-pr-raise appliqation-explorer`), or point at local builds
-via `AUTOTEST_CMD` / `DEFECT_FIX_CMD` / `SCRIPTGEN_CMD` / `PR_RAISE_CMD` / `EXPLORER_CMD` in
-`.env` (see `.env.example`).
+You'll also need whichever sibling agents autopilot is allowed to call — install the ones
+you want reachable (see [Workflow options](#workflow-options) above for real combinations;
+you don't need all five for every use case):
 
 ```bash
-npx appliqation-autopilot run \
+npm install -g appliqation-autotest appliqation-defect-fix \
+  appliqation-scriptgen appliqation-pr-raise appliqation-explorer
+```
+
+Each is a plain command name by default (`AUTOTEST_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/
+`PR_RAISE_CMD`/`EXPLORER_CMD` in `.env`) — only override these if you're pointing at a local
+development build instead.
+
+Create a `.env` file (in whatever directory you'll run it from) with:
+
+```
+APPQ_API_KEY=your-appliqation-api-key
+ANTHROPIC_API_KEY=your-anthropic-key   # or OPENAI_API_KEY — pick one
+```
+
+```bash
+appliqation-autopilot run \
   --test-case-uuid <uuid> \
   --environment Stage \
   --repo-path /path/to/your/checkout
@@ -276,6 +286,10 @@ of these is set, and a write failure never affects a real run's outcome.
 ## Development
 
 ```bash
+git clone https://github.com/appliqation/appliqation-autopilot.git
+cd appliqation-autopilot
+npm install
+cp .env.example .env   # fill in APPQ_API_KEY and one LLM provider key
 npm run dev -- run --test-case-uuid <uuid> --environment <name> --repo-path <path>
 npm run typecheck
 npm test
