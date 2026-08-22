@@ -1,6 +1,6 @@
 {
   "name": "@appliqation/autopilot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An agentic orchestrator that decides, per test case, whether to run autonomous testing, generate new automation, or raise a pull request for it — reasoning over real signal (current pass/fail state, flakiness, linked defects, coverage priority), not a fixed script. Reasoning lives entirely in this repo, not a private server.",
   "license": "MIT",
   "repository": {
