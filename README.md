@@ -20,13 +20,13 @@ want deterministic control instead. Autopilot is the layer above them that decid
 
 | Agent | Does | Repo |
 |---|---|---|
-| **Autotest** | Runs a test case in a real browser; a second, independent AI judges the result from evidence alone — never its own claim. | [`appliqation-autotest`](https://github.com/appliqation/appliqation-autotest) |
-| **Defect-Fix** | Loads full defect context, locates and applies a real code fix, syncs the scenario, verifies with a real Playwright run. | [`appliqation-defect-fix`](https://github.com/appliqation/appliqation-defect-fix) |
-| **Scriptgen** | Drafts a Playwright script for an untested-but-passing test case, iterating against real runs until genuinely green. | [`appliqation-scriptgen`](https://github.com/appliqation/appliqation-scriptgen) |
-| **PR-Raise** | Fully mechanical, no LLM: commits whatever's already changed, pushes, opens or reuses a pull request. | [`appliqation-pr-raise`](https://github.com/appliqation/appliqation-pr-raise) |
-| **Explorer** | Open-ended exploratory QA — a senior-QA heuristics pass plus security/network/caching/mobile probes, headlessly, the coverage a scripted test case never checks for. | [`appliqation-explorer`](https://github.com/appliqation/appliqation-explorer) |
+| **Autotest** | Runs a test case in a real browser; a second, independent AI judges the result from evidence alone — never its own claim. | [`appliqation-autotest`](https://github.com/appliqation/autotest) |
+| **Defect-Fix** | Loads full defect context, locates and applies a real code fix, syncs the scenario, verifies with a real Playwright run. | [`appliqation-defect-fix`](https://github.com/appliqation/defect-fix) |
+| **Scriptgen** | Drafts a Playwright script for an untested-but-passing test case, iterating against real runs until genuinely green. | [`appliqation-scriptgen`](https://github.com/appliqation/scriptgen) |
+| **PR-Raise** | Fully mechanical, no LLM: commits whatever's already changed, pushes, opens or reuses a pull request. | [`appliqation-pr-raise`](https://github.com/appliqation/pr-raise) |
+| **Explorer** | Open-ended exploratory QA — a senior-QA heuristics pass plus security/network/caching/mobile probes, headlessly, the coverage a scripted test case never checks for. | [`appliqation-explorer`](https://github.com/appliqation/explorer) |
 
-All five share [`@appliqation/agent-core`](https://github.com/appliqation/appliqation-agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
+All five share [`@appliqation/agent-core`](https://github.com/appliqation/agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
 
 ## Why this is different from "wire an LLM to some CLIs"
 
@@ -279,15 +279,15 @@ Optionally, `AUDIT_MONGO_URI`/`AUDIT_MONGO_DB`/`AUDIT_MONGO_COLLECTION` or
 `AUDIT_JSONL_PATH` records one audit entry per invocation (token usage, duration, real
 outcome) to a datastore this agent family owns — deliberately not part of Appliqation
 itself, since this is a parallel system that uses it, not a feature of it. Every sibling
-agent in the family writes to the same shape; [`appliqation-dashboard`](https://github.com/appliqation/appliqation-dashboard)
+agent in the family writes to the same shape; [`appliqation-dashboard`](https://github.com/appliqation/dashboard)
 reads it back as an aggregated report. Entirely opt-in — nothing is recorded unless one
 of these is set, and a write failure never affects a real run's outcome.
 
 ## Development
 
 ```bash
-git clone https://github.com/appliqation/appliqation-autopilot.git
-cd appliqation-autopilot
+git clone https://github.com/appliqation/autopilot.git
+cd autopilot
 npm install
 cp .env.example .env   # fill in APPQ_API_KEY and one LLM provider key
 npm run dev -- run --test-case-uuid <uuid> --environment <name> --repo-path <path>
