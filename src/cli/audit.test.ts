@@ -6,7 +6,7 @@ const usage = { inputTokens: 100, outputTokens: 50, cacheWriteTokens: 0, cacheRe
 
 describe('recordAutopilotRun', () => {
   it('records one call with agent/subcommand and the outcome including allowPr', async () => {
-    const sink: AuditSink = { record: vi.fn().mockResolvedValue(undefined) };
+    const sink: AuditSink = { record: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
     await recordAutopilotRun({
       sink,
       startedAt: 1000,
@@ -27,7 +27,7 @@ describe('recordAutopilotRun', () => {
   });
 
   it('records exitCode 1 and an error outcome when result is undefined — autopilot() threw', async () => {
-    const sink: AuditSink = { record: vi.fn().mockResolvedValue(undefined) };
+    const sink: AuditSink = { record: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
     await recordAutopilotRun({ sink, startedAt: 0, endedAt: 1, model: 'x', usage, testCaseUuid: 'tc-1', environment: 'Stage', repoPath: '/repo', allowPr: false, result: undefined });
     const record = (sink.record as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(record.exitCode).toBe(1);
@@ -35,7 +35,7 @@ describe('recordAutopilotRun', () => {
   });
 
   it('a sink failure never rejects — safeRecord swallows it', async () => {
-    const sink: AuditSink = { record: vi.fn().mockRejectedValue(new Error('down')) };
+    const sink: AuditSink = { record: vi.fn().mockRejectedValue(new Error('down')), close: vi.fn().mockResolvedValue(undefined) };
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await expect(
       recordAutopilotRun({
@@ -51,5 +51,18 @@ describe('recordAutopilotRun', () => {
         result: { report: 'r', turns: 1, budgetExceeded: false },
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('closes the sink after recording — N-03: an unclosed Mongo client hangs the process since this CLI never calls process.exit()', async () => {
+    const sink: AuditSink = { record: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
+    await recordAutopilotRun({ sink, startedAt: 0, endedAt: 1, model: 'x', usage, testCaseUuid: 'tc-1', environment: 'Stage', repoPath: '/repo', allowPr: false, result: undefined });
+    expect(sink.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('still closes the sink even when record() failed', async () => {
+    const sink: AuditSink = { record: vi.fn().mockRejectedValue(new Error('down')), close: vi.fn().mockResolvedValue(undefined) };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await recordAutopilotRun({ sink, startedAt: 0, endedAt: 1, model: 'x', usage, testCaseUuid: 'tc-1', environment: 'Stage', repoPath: '/repo', allowPr: false, result: undefined });
+    expect(sink.close).toHaveBeenCalledTimes(1);
   });
 });

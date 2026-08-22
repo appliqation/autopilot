@@ -2,7 +2,7 @@
 // file's top-level program.parseAsync(process.argv) side effect — same
 // reasoning as appliqation-autotest's cli/resolvers.ts.
 
-import { safeRecord, type AuditSink, type AuditRecord } from '@appliqation/agent-core';
+import { safeRecord, safeClose, type AuditSink, type AuditRecord } from '@appliqation/agent-core';
 import type { LoopResult } from '@appliqation/agent-core';
 
 export interface RecordAutopilotRunArgs {
@@ -36,4 +36,5 @@ export async function recordAutopilotRun(args: RecordAutopilotRunArgs): Promise<
       ? { testCaseUuid, environment, repoPath, allowPr, turns: result.turns, budgetExceeded: result.budgetExceeded, report: result.report }
       : { testCaseUuid, environment, repoPath, allowPr, error: true },
   });
+  await safeClose(sink);
 }
