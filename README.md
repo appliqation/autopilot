@@ -268,6 +268,13 @@ is a complete, independently useful CLI (see [workflow 2](#2-deterministic-ci-pi
   than the permissive one baked into the interactive prompt. See that repo's README for
   the full reasoning.
 
+**Run this inside a container with an egress allowlist**, same as every sibling it can spawn.
+This process's own direct network need is narrow (your LLM provider and `APPQ_ORIGIN`), but
+`run_judge`/`run_generate`/`run_defect_fix`/`run_explore`/`run_pr_raise` each spawn a sibling
+agent as a real subprocess, and each of those has its own broader surface — a live browser, a
+real shell, or a real `GITHUB_TOKEN` — documented in that sibling's own README under "Running
+this safely." Containing this process alone isn't sufficient; contain the whole tree it can spawn.
+
 ## Configuration
 
 See `.env.example` for the full list. In short: `APPQ_API_KEY` + one LLM provider key are
