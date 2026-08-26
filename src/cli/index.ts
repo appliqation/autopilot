@@ -62,6 +62,13 @@ program
   .requiredOption('--test-case-uuid <uuid>', 'test case UUID to route')
   .requiredOption('--environment <name>', 'environment name — passed to run_judge/run_generate')
   .requiredOption('--repo-path <path>', 'local repo checkout run_generate/run_pr_raise operate in')
+  .option(
+    '--defect-id <id>',
+    'the specific defect that triggered this run, when the caller already resolved one (e.g. derived ' +
+      'test-case-uuid FROM a defect). Without this, Phase 1 only discovers a linked defect incidentally, if ' +
+      'one happens to surface through get_test_results/get_quality_context — passing it makes the defect/TC ' +
+      'mismatch check in the policy actually check against the real triggering defect, not miss it.',
+  )
   .option('--allow-pr', 'authorize run_pr_raise — without this flag, that tool is not even offered to the model')
   .option('--policy <path>', 'override the bundled decision policy with your own system prompt file')
   .option('--max-turns <n>', 'override BUDGET_MAX_TURNS for this run')
@@ -72,6 +79,7 @@ program
       testCaseUuid: string;
       environment: string;
       repoPath: string;
+      defectId?: string;
       allowPr?: boolean;
       policy?: string;
       maxTurns?: string;
@@ -105,6 +113,7 @@ program
           testCaseUuid: opts.testCaseUuid,
           environment: opts.environment,
           repoPath: opts.repoPath,
+          defectId: opts.defectId,
           budget,
           metaTools: {
             autotestCmd: config.autotestCmd,
@@ -135,6 +144,7 @@ program
           testCaseUuid: opts.testCaseUuid,
           environment: opts.environment,
           repoPath: opts.repoPath,
+          defectId: opts.defectId,
           allowPr,
           result,
         });

@@ -45,11 +45,17 @@ pull every signal that would actually change your decision:
 redundant; consider whether the existing coverage is enough instead.
 - \`get_failure_patterns\` — this TC's own pass_rate/is_flaky, and its siblings'. A flaky TC changes your \
 confidence in any result you get, not just a fact to mention.
-- \`get_defect_context\` for any defect linked to this TC or surfaced above — a known, unresolved root cause \
+- \`get_defect_context\` for any defect linked to this TC or surfaced above — **if your seed context named a \
+Triggering defect ID, call this on it first, directly, rather than waiting to see if it gets surfaced by \
+another signal.** A known, unresolved root cause \
 changes what a failure *means* (a known bug, not new information) and whether generating a script now would \
 just encode broken behaviour as a passing baseline. This is also the trigger signal for \`run_defect_fix\`: \
 its \`defect_history\`, \`run_context\`, and \`routes_visited\` are exactly what you need to judge both whether \
-the root cause looks fixable and — per Phase 2 below — how much verification the fix will actually need.
+the root cause looks fixable and — per Phase 2 below — how much verification the fix will actually need. \
+**Also compare the defect's own \`defect_text\`/\`comment\` against the linked \`test_case.name\`/\`steps\`** \
+— a defect filed during live/exploratory testing is often linked to whichever TC happened to be active at \
+that moment, not one actually written to describe what was reported. If they clearly describe different \
+behaviour, this TC's pass/fail status tells you nothing about the defect at all — see Phase 2's mismatch case.
 - \`get_coverage_analysis\` / \`get_quality_context\` — is this TC/feature area actually a priority right \
 now, or is effort better spent elsewhere? A routing decision includes deciding effort isn't warranted.
 - \`get_evidence_summary\` / \`get_run_evidence\` / \`get_execution_evidence\` / \`get_test_results\` — has \
@@ -73,6 +79,17 @@ reasoning a reviewer should be able to audit later. Cover:
 - **Current state**: is this TC known to currently pass, currently fail, or unknown (no recent evidence of \
 any kind)?
 - **Decision**, and why —
+  - **Defect/TC mismatch** (check this first, before anything below): if Phase 1 showed the linked \
+test_case doesn't actually describe what the defect reports, treat this as genuinely uncovered behaviour — \
+not as "this TC passes" or "this TC fails." Running run_judge or run_generate against the mismatched TC \
+would test or lock in coverage for the wrong thing entirely, regardless of what its own status says. Route \
+straight to run_defect_fix instead, with a test_instruction that states the mismatch explicitly and \
+instructs it to fix the actually-reported behaviour and add real coverage for it — appq:fix's own Phase 4 \
+already creates a new test case via add_test_cases when a fix represents new, undocumented coverage; your \
+job here is only to recognise the mismatch and route correctly, not to fabricate the new test case yourself. \
+Once run_defect_fix returns verified: true, treat whatever new/updated TC it created the same as any other \
+newly-passing, uncovered TC (see the passing-TC bullet below) — a real candidate for run_generate before \
+run_pr_raise, not skipped just because a fix already happened.
   - No recent evidence exists at all → run_judge first. Never generate a script for a TC whose current \
 behaviour you haven't actually confirmed.
   - Evidence shows the TC currently **fails** → do not generate a script now — that would lock in broken \

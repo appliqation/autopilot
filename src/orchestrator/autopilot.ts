@@ -21,6 +21,19 @@ export interface AutopilotOptions {
   repoPath: string;
   budget: RunBudget;
   metaTools: MetaToolsConfig;
+  /**
+   * The specific defect that triggered this run, when the caller already
+   * knows it (e.g. a fetch-latest-defect wrapper that resolved test_case_uuid
+   * FROM a defect_id in the first place). Optional — Phase 1's own context
+   * gathering still works without it, but only discovers a "linked defect"
+   * incidentally, if one happens to be surfaced through get_test_results/
+   * get_quality_context. Passing this closes that gap: it's the difference
+   * between Phase 1 *maybe* noticing a defect exists for this TC, and Phase 1
+   * *definitely* loading the exact defect that motivated this invocation,
+   * which is what its own defect/TC mismatch check (see systemPrompt.ts)
+   * actually needs to be checking against.
+   */
+  defectId?: string;
   /** Overrides the bundled policy — see src/policy/systemPrompt.ts and --policy. */
   systemPromptOverride?: string;
   onEvent?: (event: { type: string; detail?: unknown }) => void;
@@ -47,7 +60,15 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
   const seedMessage = [
     `Test case UUID: ${opts.testCaseUuid}`,
     `Environment: ${opts.environment}`,
-    `Repo path (for run_generate/run_pr_raise): ${opts.repoPath}`,
+    `Repo path (for run_defect_fix/run_generate/run_pr_raise): ${opts.repoPath}`,
+    ...(opts.defectId
+      ? [
+          `Triggering defect ID: ${opts.defectId} — this specific defect is why this run was invoked. ` +
+            'Call get_defect_context on it directly as your first defect-related lookup in Phase 1 — do not ' +
+            'wait for it to be surfaced incidentally through get_test_results/get_quality_context, and do not ' +
+            'skip the defect/TC mismatch check just because no other signal happens to mention it.',
+        ]
+      : []),
     'Begin now — start with get_scenario.',
   ].join('\n');
 

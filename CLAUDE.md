@@ -69,10 +69,14 @@ instruction, not just decide whether to call the tool.
 
 - `src/policy/systemPrompt.ts` — **the actual customization point.** `buildSystemPrompt(allowPr)`
   is the full decision methodology: context-gathering priorities (current state first,
-  then flakiness/defects/coverage/quality), the decision rules (no evidence → judge
-  first; failing → don't generate; passing + no canonical → generate; flaky → generate
-  with lower confidence; low-priority → recommend and stop, that's a legitimate
-  outcome), the adaptive-execution discipline (re-check every real result, never
+  then flakiness/defects/coverage/quality), the decision rules (**defect/TC mismatch
+  checked first** — a defect linked to a test case that doesn't actually describe it
+  (common for exploratory defects filed against whatever TC was active, not one written
+  for that issue) routes straight to `run_defect_fix` regardless of the mismatched TC's
+  own pass/fail status, never `run_judge`/`run_generate` against the wrong thing; no
+  evidence → judge first; failing → don't generate; passing + no canonical → generate;
+  flaky → generate with lower confidence; low-priority → recommend and stop, that's a
+  legitimate outcome), the adaptive-execution discipline (re-check every real result, never
   execute a plan blindly), and the report structure (every claim must cite a real tool
   result). `run_explore`'s guidance is deliberately NOT a deterministic trigger list —
   see its own paragraph in Phase 2: the bar is a specific, stated reason drawn from
