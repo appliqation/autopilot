@@ -55,13 +55,24 @@ program
 program
   .command('run')
   .description(
-    'Route one test case. Gathers context, states a plan, executes it adaptively (run_judge/run_defect_fix/' +
-      'run_generate, and run_pr_raise if --allow-pr), re-checking real results at every step. Never claims an ' +
-      "outcome it did not actually observe via a tool call — see the policy's own non-negotiable rule.",
+    'Route one test case, or an entire scenario/test set. Gathers context, states a plan, executes it ' +
+      'adaptively (run_judge/run_defect_fix/run_heal/run_generate, and run_pr_raise if --allow-pr), re-checking ' +
+      'real results at every step. Never claims an outcome it did not actually observe via a tool call — see ' +
+      "the policy's own non-negotiable rule.",
   )
-  .requiredOption('--test-case-uuid <uuid>', 'test case UUID to route')
+  .option('--test-case-uuid <uuid>', 'one test case to route. Mutually exclusive with --scenario-id/--test-set-id.')
+  .option(
+    '--scenario-id <id>',
+    'an entire scenario to route — richer context, and Phase 1 gets paid for once instead of once per TC. ' +
+      'Mutually exclusive with --test-case-uuid/--test-set-id.',
+  )
+  .option(
+    '--test-set-id <id>',
+    'an entire test set to route (can span multiple scenarios — the common regression/sanity/smoke shape). ' +
+      'Mutually exclusive with --test-case-uuid/--scenario-id.',
+  )
   .requiredOption('--environment <name>', 'environment name — passed to run_judge/run_generate')
-  .requiredOption('--repo-path <path>', 'local repo checkout run_generate/run_pr_raise operate in')
+  .requiredOption('--repo-path <path>', 'local repo checkout run_generate/run_pr_raise/run_heal operate in')
   .option(
     '--defect-id <id>',
     'the specific defect that triggered this run, when the caller already resolved one (e.g. derived ' +
@@ -76,7 +87,9 @@ program
   .option('--ci', 'shorthand for --json')
   .action(
     async (opts: {
-      testCaseUuid: string;
+      testCaseUuid?: string;
+      scenarioId?: string;
+      testSetId?: string;
       environment: string;
       repoPath: string;
       defectId?: string;
@@ -86,6 +99,16 @@ program
       json?: boolean;
       ci?: boolean;
     }) => {
+      const scopeArgsGiven = [opts.testCaseUuid, opts.scenarioId, opts.testSetId].filter((v) => v !== undefined).length;
+      if (scopeArgsGiven !== 1) {
+        console.error(
+          `Exactly one of --test-case-uuid, --scenario-id, --test-set-id is required — got ${scopeArgsGiven}. ` +
+            'These are mutually exclusive scopes, not combinable.',
+        );
+        process.exitCode = 1;
+        return;
+      }
+
       const json = (opts.json ?? false) || (opts.ci ?? false);
       const client = createMcpClient({ origin: config.appqOrigin, apiKey: config.appqApiKey() });
       const adapter = buildAdapter();
@@ -111,6 +134,8 @@ program
           client,
           adapter,
           testCaseUuid: opts.testCaseUuid,
+          scenarioId: opts.scenarioId !== undefined ? Number(opts.scenarioId) : undefined,
+          testSetId: opts.testSetId !== undefined ? Number(opts.testSetId) : undefined,
           environment: opts.environment,
           repoPath: opts.repoPath,
           defectId: opts.defectId,
@@ -121,6 +146,7 @@ program
             prRaiseCmd: config.prRaiseCmd,
             defectFixCmd: config.defectFixCmd,
             explorerCmd: config.explorerCmd,
+            healCmd: config.healCmd,
             commandTimeoutMs: config.commandTimeoutMs,
             allowPr,
           },
@@ -142,6 +168,8 @@ program
           model: resolveModel(),
           usage: usage.totals(),
           testCaseUuid: opts.testCaseUuid,
+          scenarioId: opts.scenarioId !== undefined ? Number(opts.scenarioId) : undefined,
+          testSetId: opts.testSetId !== undefined ? Number(opts.testSetId) : undefined,
           environment: opts.environment,
           repoPath: opts.repoPath,
           defectId: opts.defectId,

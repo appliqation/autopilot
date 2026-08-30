@@ -16,7 +16,17 @@ import { buildSystemPrompt } from '../policy/systemPrompt.js';
 export interface AutopilotOptions {
   client: McpClient;
   adapter: ProviderAdapter;
-  testCaseUuid: string;
+  /**
+   * Exactly one of these three — the caller validates this before calling
+   * autopilot(), same as run_judge's own mutual-exclusion check in
+   * metaTools.ts. One test case is the routine "a defect just got filed"
+   * case; scenario_id/test_set_id is for the "hand it a whole regression
+   * set" case — richer context (what's this scope's actual intent/scope),
+   * and Phase 1 only gets paid for once instead of once per TC.
+   */
+  testCaseUuid?: string;
+  scenarioId?: number;
+  testSetId?: number;
   environment: string;
   repoPath: string;
   budget: RunBudget;
@@ -57,10 +67,21 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
   };
 
   const system = opts.systemPromptOverride ?? buildSystemPrompt(opts.metaTools.allowPr);
+
+  const scopeLine = opts.testCaseUuid
+    ? `Test case UUID: ${opts.testCaseUuid}`
+    : opts.scenarioId !== undefined
+      ? `Scope: entire scenario ${opts.scenarioId} — call get_scenario to see every test case in it before ` +
+        'doing anything else. This is a multi-TC run: gather shared context once, then reason with relative ' +
+        'priority across all of them, not TC-by-TC in isolation.'
+      : `Scope: entire test set ${opts.testSetId} — call get_test_set to see every test case in it (it can ` +
+        'span multiple scenarios) before doing anything else. This is a multi-TC run: gather shared context ' +
+        'once, then reason with relative priority across all of them, not TC-by-TC in isolation.';
+
   const seedMessage = [
-    `Test case UUID: ${opts.testCaseUuid}`,
+    scopeLine,
     `Environment: ${opts.environment}`,
-    `Repo path (for run_defect_fix/run_generate/run_pr_raise): ${opts.repoPath}`,
+    `Repo path (for run_defect_fix/run_generate/run_pr_raise/run_heal): ${opts.repoPath}`,
     ...(opts.defectId
       ? [
           `Triggering defect ID: ${opts.defectId} — this specific defect is why this run was invoked. ` +
@@ -69,7 +90,11 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
             'skip the defect/TC mismatch check just because no other signal happens to mention it.',
         ]
       : []),
-    'Begin now — start with get_scenario.',
+    opts.testCaseUuid
+      ? 'Begin now — start with get_scenario.'
+      : 'Begin now — lead with a SINGLE scope-level run_judge call (scenario_id/test_set_id, not ' +
+        'test_case_uuid) before anything else. That is your cheap first-pass signal across the whole scope; ' +
+        'never loop calling run_judge per test case yourself when one scope-level call already covers it.',
   ].join('\n');
 
   return runLoop({

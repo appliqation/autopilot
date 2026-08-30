@@ -24,6 +24,7 @@ const baseCfg = {
   prRaiseCmd: 'appliqation-pr-raise',
   defectFixCmd: 'appliqation-defect-fix',
   explorerCmd: 'appliqation-explorer',
+  healCmd: 'appliqation-heal-selector',
   commandTimeoutMs: 30_000,
   allowPr: false,
 };
@@ -47,12 +48,29 @@ describe('parseCommand', () => {
 });
 
 describe('metaToolDefs', () => {
-  it('always offers run_judge, run_generate, run_defect_fix, and run_explore', () => {
+  it('always offers run_judge, run_generate, run_defect_fix, run_heal, and run_explore', () => {
     const names = metaToolDefs(baseCfg).map((t) => t.name);
     expect(names).toContain('run_judge');
     expect(names).toContain('run_generate');
     expect(names).toContain('run_defect_fix');
+    expect(names).toContain('run_heal');
     expect(names).toContain('run_explore');
+  });
+
+  it('run_judge only requires environment — test_case_uuid/scenario_id/test_set_id are each optional (mutual exclusion enforced at dispatch)', () => {
+    const def = metaToolDefs(baseCfg).find((t) => t.name === 'run_judge')!;
+    expect((def.inputSchema as { required: string[] }).required).toEqual(['environment']);
+  });
+
+  it('run_heal requires test_case_uuid/script_path/failure/environment/repo_path', () => {
+    const def = metaToolDefs(baseCfg).find((t) => t.name === 'run_heal')!;
+    expect((def.inputSchema as { required: string[] }).required).toEqual([
+      'test_case_uuid',
+      'script_path',
+      'failure',
+      'environment',
+      'repo_path',
+    ]);
   });
 
   it('run_defect_fix is offered regardless of allowPr — it never touches git/GitHub', () => {
@@ -100,7 +118,7 @@ describe('createMetaToolDispatch', () => {
 
       expect(mockExecFile).toHaveBeenCalledWith(
         'appliqation-autotest',
-        ['judge', '--test-case-uuid', 'tc-1', '--environment', 'Stage', '--json'],
+        ['judge', '--environment', 'Stage', '--test-case-uuid', 'tc-1', '--json'],
         expect.anything(),
         expect.any(Function),
       );
@@ -114,7 +132,7 @@ describe('createMetaToolDispatch', () => {
       await dispatch('run_judge', { test_case_uuid: 'tc-1', environment: 'Stage', dry_run: true });
       expect(mockExecFile).toHaveBeenCalledWith(
         'appliqation-autotest',
-        ['judge', '--test-case-uuid', 'tc-1', '--environment', 'Stage', '--dry-run', '--json'],
+        ['judge', '--environment', 'Stage', '--test-case-uuid', 'tc-1', '--dry-run', '--json'],
         expect.anything(),
         expect.any(Function),
       );
@@ -142,10 +160,128 @@ describe('createMetaToolDispatch', () => {
       await dispatch('run_judge', { test_case_uuid: 'tc-1', environment: 'Stage' });
       expect(mockExecFile).toHaveBeenCalledWith(
         'node',
-        ['/dev/autotest/dist/cli/index.js', 'judge', '--test-case-uuid', 'tc-1', '--environment', 'Stage', '--json'],
+        ['/dev/autotest/dist/cli/index.js', 'judge', '--environment', 'Stage', '--test-case-uuid', 'tc-1', '--json'],
         expect.anything(),
         expect.any(Function),
       );
+    });
+
+    it('scenario_id scope: passes --scenario-id instead of --test-case-uuid', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      await dispatch('run_judge', { scenario_id: 2424, environment: 'Stage' });
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-autotest',
+        ['judge', '--environment', 'Stage', '--scenario-id', '2424', '--json'],
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+
+    it('test_set_id scope: passes --test-set-id instead of --test-case-uuid', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      await dispatch('run_judge', { test_set_id: 1358, environment: 'Stage' });
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-autotest',
+        ['judge', '--environment', 'Stage', '--test-set-id', '1358', '--json'],
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+
+    it('passes --coverage through only when given, for scenario/test-set scope', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      await dispatch('run_judge', { scenario_id: 2424, environment: 'Stage', coverage: 'on-failure-or-absence' });
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-autotest',
+        ['judge', '--environment', 'Stage', '--scenario-id', '2424', '--coverage', 'on-failure-or-absence', '--json'],
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+
+    it('refuses with a clear error, without ever spawning a process, when zero scope args are given', async () => {
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_judge', { environment: 'Stage' });
+      expect(result.ok).toBe(false);
+      expect(result.text).toMatch(/exactly one of test_case_uuid, scenario_id, or test_set_id/);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it('refuses with a clear error, without ever spawning a process, when more than one scope arg is given', async () => {
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_judge', { test_case_uuid: 'tc-1', scenario_id: 2424, environment: 'Stage' });
+      expect(result.ok).toBe(false);
+      expect(result.text).toMatch(/exactly one of test_case_uuid, scenario_id, or test_set_id/);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('run_heal', () => {
+    it('spawns the configured heal command with heal + args + --json', async () => {
+      mockSuccess('{"testCaseUuid":"tc-1","declined":false,"testRan":true,"verified":true}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_heal', {
+        test_case_uuid: 'tc-1',
+        script_path: 'tests/spec.ts',
+        failure: 'Locator #old-id not found',
+        environment: 'Stage',
+        repo_path: '/repo',
+      });
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-heal-selector',
+        [
+          'heal',
+          '--test-case-uuid',
+          'tc-1',
+          '--script-path',
+          'tests/spec.ts',
+          '--failure',
+          'Locator #old-id not found',
+          '--environment',
+          'Stage',
+          '--repo-path',
+          '/repo',
+          '--json',
+        ],
+        expect.anything(),
+        expect.any(Function),
+      );
+      expect(result.ok).toBe(true);
+      expect(JSON.parse(result.text)).toMatchObject({ declined: false, verified: true });
+    });
+
+    it('includes --defect-id only when given', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      await dispatch('run_heal', {
+        test_case_uuid: 'tc-1',
+        script_path: 'tests/spec.ts',
+        failure: 'x',
+        environment: 'Stage',
+        repo_path: '/repo',
+        defect_id: 'defect-42',
+      });
+      const callArgs = mockExecFile.mock.calls[0][1] as string[];
+      expect(callArgs).toContain('--defect-id');
+      expect(callArgs).toContain('defect-42');
+    });
+
+    it('recovers the real --json summary from stdout even when the CLI exits non-zero (a decline or unverified attempt)', async () => {
+      mockFailure(1, '{"testCaseUuid":"tc-1","declined":true,"testRan":false,"verified":false}');
+      const dispatch = createMetaToolDispatch(baseCfg);
+      const result = await dispatch('run_heal', {
+        test_case_uuid: 'tc-1',
+        script_path: 'tests/spec.ts',
+        failure: 'x',
+        environment: 'Stage',
+        repo_path: '/repo',
+      });
+      expect(result.ok).toBe(false);
+      expect(JSON.parse(result.text)).toMatchObject({ declined: true });
     });
   });
 

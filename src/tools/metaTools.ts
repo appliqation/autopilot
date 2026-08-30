@@ -56,6 +56,7 @@ export interface MetaToolsConfig {
   prRaiseCmd: string;
   defectFixCmd: string;
   explorerCmd: string;
+  healCmd: string;
   commandTimeoutMs: number;
   /** Whether run_pr_raise is even offered — see metaToolDefs(). */
   allowPr: boolean;
@@ -66,20 +67,35 @@ export function metaToolDefs(cfg: MetaToolsConfig): LlmToolDef[] {
     {
       name: 'run_judge',
       description:
-        'Run autonomous testing (a real executor + validator pass) for one test case against a live ' +
-        "environment. Returns the real, appq-polled outcome. This is the ONLY way to know a test case's " +
-        'current pass/fail state — never assume it from prior context alone.',
+        'Run autonomous testing against a live environment — one test case, or an entire scenario/test set ' +
+        'at once via scenario_id/test_set_id. This is the ONLY way to know current pass/fail state — never ' +
+        'assume it from prior context alone. At scenario/test_set scope, this is your cheap first-pass signal: ' +
+        'appliqation-autotest itself runs the deterministic canonical-script pipeline for every TC that has ' +
+        'one (zero extra LLM cost) and only agentically judges the rest, per its own coverage policy — pass ' +
+        'coverage: "on-failure-or-absence" to also re-verify a TC whose canonical script exists but just ' +
+        'failed (the default, "on-script-absence", silently trusts a possibly-stale script forever). Lead with ' +
+        'ONE scope-level call here before spending further budget — never loop calling this per test case ' +
+        'yourself when a single scenario_id/test_set_id call already covers the whole set. Returns a real, ' +
+        'appq-polled outcome per test case either way.',
       inputSchema: {
         type: 'object',
         properties: {
-          test_case_uuid: { type: 'string' },
+          test_case_uuid: { type: 'string', description: 'One test case. Mutually exclusive with scenario_id/test_set_id.' },
+          scenario_id: { type: 'integer', description: 'An entire scenario. Mutually exclusive with test_case_uuid/test_set_id.' },
+          test_set_id: { type: 'integer', description: 'An entire test set (can span multiple scenarios). Mutually exclusive with test_case_uuid/scenario_id.' },
           environment: { type: 'string' },
+          coverage: {
+            type: 'string',
+            description:
+              'Only meaningful with scenario_id/test_set_id: always | on-script-absence | on-failure-or-absence | ' +
+              'sampled:N | external. Defaults to on-script-absence if omitted.',
+          },
           dry_run: {
             type: 'boolean',
             description: 'Suppress writeback to Appliqation — use when you only need to observe current behaviour, not record a verdict.',
           },
         },
-        required: ['test_case_uuid', 'environment'],
+        required: ['environment'],
       },
     },
     {
@@ -126,6 +142,32 @@ export function metaToolDefs(cfg: MetaToolsConfig): LlmToolDef[] {
           },
         },
         required: ['defect_id', 'repo_path', 'test_instruction'],
+      },
+    },
+    {
+      name: 'run_heal',
+      description:
+        'Repair ONE broken selector in an EXISTING canonical script — narrow and token-efficient, never a full ' +
+        'regenerate (that\'s run_generate\'s job). Use this specifically for the "canonical script exists but ' +
+        'just failed" case (run_judge with coverage: "on-failure-or-absence" surfaces these) — it independently ' +
+        'diagnoses whether the failure is genuine selector staleness (heals it) or a real behaviour change ' +
+        '(declines, touches nothing). declined: true in the result means this is NOT a healing case — treat it ' +
+        'exactly like any other confirmed failure (a run_defect_fix candidate), do not retry healing. Only a ' +
+        'real, independently-executed Playwright run — never the model\'s own claim — counts as verified.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          test_case_uuid: { type: 'string' },
+          script_path: { type: 'string', description: 'The canonical script file containing the broken selector, relative to repo_path.' },
+          failure: {
+            type: 'string',
+            description: 'What is failing and why, from your own gathered evidence (the step, the selector, the error message) — never a generic instruction.',
+          },
+          environment: { type: 'string' },
+          defect_id: { type: 'string', description: 'Optional — a defect linked to this failure, if known.' },
+          repo_path: { type: 'string' },
+        },
+        required: ['test_case_uuid', 'script_path', 'failure', 'environment', 'repo_path'],
       },
     },
     {
@@ -198,7 +240,19 @@ export function createMetaToolDispatch(cfg: MetaToolsConfig) {
   return async (name: string, args: Record<string, unknown>): Promise<ToolResult> => {
     switch (name) {
       case 'run_judge': {
-        const cliArgs = ['--test-case-uuid', String(args.test_case_uuid), '--environment', String(args.environment)];
+        const scopeArgsGiven = [args.test_case_uuid, args.scenario_id, args.test_set_id].filter((v) => v !== undefined).length;
+        if (scopeArgsGiven !== 1) {
+          return {
+            ok: false,
+            text: 'run_judge needs exactly one of test_case_uuid, scenario_id, or test_set_id — got ' +
+              `${scopeArgsGiven}. These are mutually exclusive scopes, not combinable.`,
+          };
+        }
+        const cliArgs = ['--environment', String(args.environment)];
+        if (args.test_case_uuid !== undefined) cliArgs.push('--test-case-uuid', String(args.test_case_uuid));
+        if (args.scenario_id !== undefined) cliArgs.push('--scenario-id', String(args.scenario_id));
+        if (args.test_set_id !== undefined) cliArgs.push('--test-set-id', String(args.test_set_id));
+        if (args.coverage) cliArgs.push('--coverage', String(args.coverage));
         if (args.dry_run) cliArgs.push('--dry-run');
         return runCliJson(cfg.autotestCmd, 'judge', cliArgs, cfg.commandTimeoutMs);
       }
@@ -218,6 +272,22 @@ export function createMetaToolDispatch(cfg: MetaToolsConfig) {
         ];
         if (args.dry_run) cliArgs.push('--dry-run');
         return runCliJson(cfg.defectFixCmd, 'fix', cliArgs, cfg.commandTimeoutMs);
+      }
+      case 'run_heal': {
+        const cliArgs = [
+          '--test-case-uuid',
+          String(args.test_case_uuid),
+          '--script-path',
+          String(args.script_path),
+          '--failure',
+          String(args.failure),
+          '--environment',
+          String(args.environment),
+          '--repo-path',
+          String(args.repo_path),
+        ];
+        if (args.defect_id) cliArgs.push('--defect-id', String(args.defect_id));
+        return runCliJson(cfg.healCmd, 'heal', cliArgs, cfg.commandTimeoutMs);
       }
       case 'run_explore': {
         const cliArgs = ['--prompt', String(args.prompt)];

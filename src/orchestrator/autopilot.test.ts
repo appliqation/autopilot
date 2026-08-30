@@ -56,6 +56,7 @@ function baseOpts() {
       prRaiseCmd: 'appliqation-pr-raise',
       defectFixCmd: 'appliqation-defect-fix',
       explorerCmd: 'appliqation-explorer',
+      healCmd: 'appliqation-heal-selector',
       commandTimeoutMs: 30_000,
       allowPr: false,
     },
@@ -107,6 +108,53 @@ describe('autopilot', () => {
     expect(call.seedMessage).toContain('2424-abc');
     expect(call.seedMessage).toContain('Stage');
     expect(call.seedMessage).toContain('/repo');
+  });
+
+  it('single-TC scope: seed message tells the model to start with get_scenario', async () => {
+    await autopilot(baseOpts());
+    const call = mockRunLoop.mock.calls[0][0];
+    expect(call.seedMessage).toContain('start with get_scenario');
+  });
+
+  describe('scenario/test-set scope', () => {
+    function scenarioOpts() {
+      const { testCaseUuid: _testCaseUuid, ...rest } = baseOpts();
+      return { ...rest, scenarioId: 2424 };
+    }
+    function testSetOpts() {
+      const { testCaseUuid: _testCaseUuid, ...rest } = baseOpts();
+      return { ...rest, testSetId: 1358 };
+    }
+
+    it('scenario_id: seed message names the scenario and tells the model to enumerate via get_scenario', async () => {
+      await autopilot(scenarioOpts());
+      const call = mockRunLoop.mock.calls[0][0];
+      expect(call.seedMessage).toContain('entire scenario 2424');
+      expect(call.seedMessage).toContain('get_scenario');
+      expect(call.seedMessage).not.toContain('Test case UUID:');
+    });
+
+    it('test_set_id: seed message names the test set and tells the model to enumerate via get_test_set', async () => {
+      await autopilot(testSetOpts());
+      const call = mockRunLoop.mock.calls[0][0];
+      expect(call.seedMessage).toContain('entire test set 1358');
+      expect(call.seedMessage).toContain('get_test_set');
+    });
+
+    it('scenario/test-set scope: seed message tells the model to lead with one scope-level run_judge call, never to loop per TC itself', async () => {
+      await autopilot(scenarioOpts());
+      const call = mockRunLoop.mock.calls[0][0];
+      expect(call.seedMessage).toContain('SINGLE scope-level run_judge call');
+      expect(call.seedMessage).toContain('never loop calling run_judge per test case');
+    });
+
+    it('scenario/test-set scope still includes environment, repo path, and an optional defect ID line', async () => {
+      await autopilot({ ...scenarioOpts(), defectId: 'defect-42' });
+      const call = mockRunLoop.mock.calls[0][0];
+      expect(call.seedMessage).toContain('Stage');
+      expect(call.seedMessage).toContain('/repo');
+      expect(call.seedMessage).toContain('defect-42');
+    });
   });
 
   it('routes meta-tool-named dispatches to the meta dispatch, everything else to the gated appq dispatcher', async () => {
