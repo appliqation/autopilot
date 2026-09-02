@@ -29,6 +29,13 @@ export interface AutopilotOptions {
   testSetId?: number;
   environment: string;
   repoPath: string;
+  /**
+   * Production/baseline environment name for run_visual_check, when
+   * --visual is authorized. Meaningless without run_visual_check being
+   * offered, and run_visual_check is meaningless without this: nothing
+   * else derives a baseline environment name from anything else.
+   */
+  baselineEnvironment?: string;
   budget: RunBudget;
   metaTools: MetaToolsConfig;
   /**
@@ -66,7 +73,7 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
     return gatedAppq(name, args);
   };
 
-  const system = opts.systemPromptOverride ?? buildSystemPrompt(opts.metaTools.allowPr);
+  const system = opts.systemPromptOverride ?? buildSystemPrompt(opts.metaTools.allowPr, opts.metaTools.allowVisual);
 
   const scopeLine = opts.testCaseUuid
     ? `Test case UUID: ${opts.testCaseUuid}`
@@ -82,6 +89,9 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
     scopeLine,
     `Environment: ${opts.environment}`,
     `Repo path (for run_defect_fix/run_generate/run_pr_raise/run_heal): ${opts.repoPath}`,
+    ...(opts.baselineEnvironment
+      ? [`Baseline (production) environment for run_visual_check, if you call it: ${opts.baselineEnvironment}`]
+      : []),
     ...(opts.defectId
       ? [
           `Triggering defect ID: ${opts.defectId} — this specific defect is why this run was invoked. ` +

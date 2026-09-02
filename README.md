@@ -1,20 +1,20 @@
 # Appliqation Autopilot
 
-**An agentic orchestrator that decides — for real, every time — whether a test case needs
-autonomous testing, selector healing, a defect fix, new automation, or a pull request,
-instead of running a fixed script.**
+**An agentic orchestrator that decides, for real, every time, whether a test case needs
+autonomous testing, selector healing, a defect fix, new automation, a visual regression
+check, or a pull request, instead of running a fixed script.**
 
 Most "AI test automation" tooling is a pipeline with an LLM bolted onto one step. Autopilot
-is different: given one test case — or an entire scenario or test set — it gathers real
+is different: given one test case, or an entire scenario or test set, it gathers real
 signal (current pass/fail state, flakiness, linked defects, coverage priority, whether
 automation already exists), reasons about what's actually warranted the way a senior QA
-engineer scoping their day would, states a plan, and executes it — checking real results
+engineer scoping their day would, states a plan, and executes it, checking real results
 after every action and adapting when reality disagrees with the plan, rather than committing
 blindly upfront. At scenario/test-set scope, it gathers that context once and reasons with
 relative priority across every test case in scope, rather than re-paying full context cost
 per test case or judging everything indiscriminately.
 
-It orchestrates six independent, single-purpose agents as ordinary tools it can call. None
+It orchestrates seven independent, single-purpose agents as ordinary tools it can call. None
 of them know Autopilot exists. Each does one thing well and can be scripted directly if you
 want deterministic control instead. Autopilot is the layer above them that decides *when* and
 *whether* to use each one.
@@ -23,19 +23,20 @@ want deterministic control instead. Autopilot is the layer above them that decid
 
 | Agent | Does | Repo |
 |---|---|---|
-| **Autotest** | Runs a test case in a real browser; a second, independent AI judges the result from evidence alone — never its own claim. Also does its own scenario/test-set-scale sweep: deterministic canonical-script pass first, agentic judging only for what's uncovered or newly failed. | [`appliqation-autotest`](https://github.com/appliqation/autotest) |
-| **Heal-Selector** | Repairs one broken Playwright selector in an existing script — never a full regenerate. Verifies the healed selector targets the *same semantic element* (accessibility role + name, the test case's own expected-result text) before touching anything; declines rather than picking a selector that merely makes the assertion pass again. | [`appliqation-heal-selector`](https://github.com/appliqation/heal-selector) |
+| **Autotest** | Runs a test case in a real browser; a second, independent AI judges the result from evidence alone, never its own claim. Also does its own scenario/test-set-scale sweep: deterministic canonical-script pass first, agentic judging only for what's uncovered or newly failed. | [`appliqation-autotest`](https://github.com/appliqation/autotest) |
+| **Heal-Selector** | Repairs one broken Playwright selector in an existing script, never a full regenerate. Verifies the healed selector targets the *same semantic element* (accessibility role + name, the test case's own expected-result text) before touching anything; declines rather than picking a selector that merely makes the assertion pass again. | [`appliqation-heal-selector`](https://github.com/appliqation/heal-selector) |
+| **Visual-Regression** | Diffs one route against its own live production counterpart, no stored baseline files. Declines (not applicable) rather than comparing when the route doesn't exist on production; the mechanical work is entirely code-owned, the model only judges the real diff it's shown. | [`appliqation-visual-regression`](https://github.com/appliqation/visual-regression) |
 | **Defect-Fix** | Loads full defect context, locates and applies a real code fix, syncs the scenario, verifies with a real Playwright run. | [`appliqation-defect-fix`](https://github.com/appliqation/defect-fix) |
 | **Scriptgen** | Drafts a Playwright script for an untested-but-passing test case, iterating against real runs until genuinely green. | [`appliqation-scriptgen`](https://github.com/appliqation/scriptgen) |
 | **PR-Raise** | Fully mechanical, no LLM: commits whatever's already changed, pushes, opens or reuses a pull request. | [`appliqation-pr-raise`](https://github.com/appliqation/pr-raise) |
-| **Explorer** | Open-ended exploratory QA — a senior-QA heuristics pass plus security/network/caching/mobile probes, headlessly, the coverage a scripted test case never checks for. | [`appliqation-explorer`](https://github.com/appliqation/explorer) |
+| **Explorer** | Open-ended exploratory QA: a senior-QA heuristics pass plus security/network/caching/mobile probes, headlessly, the coverage a scripted test case never checks for. | [`appliqation-explorer`](https://github.com/appliqation/explorer) |
 
-All six share [`@appliqation/agent-core`](https://github.com/appliqation/agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
+All seven share [`@appliqation/agent-core`](https://github.com/appliqation/agent-core), the generic think→act→observe engine, budget tracking, and tool-dispatch machinery underneath each of them.
 
 ## Why this is different from "wire an LLM to some CLIs"
 
 - **The reasoning is real, not decorative.** The system prompt (`src/policy/systemPrompt.ts`)
-  encodes an actual decision framework — not "call these tools in order," but genuine
+  encodes an actual decision framework, not "call these tools in order," but genuine
   branches: a currently-*failing* test case does **not** get a script generated for it (that
   would encode broken behaviour as a false baseline); a flaky one gets a script but with
   explicitly lowered confidence in the report; a low-priority one may legitimately get *no*
@@ -44,23 +45,28 @@ All six share [`@appliqation/agent-core`](https://github.com/appliqation/agent-c
 - **It never fabricates an outcome.** Every claim in the final report has to trace back to a
   real tool result. `run_generate`'s `testRun.ok` and `run_defect_fix`'s `verified` reflect an
   actually-executed Playwright run, not the model's own claim about it. `run_judge`'s status is
-  polled from Appliqation's own authoritative run record, not parsed out of report prose. If
-  Autopilot says a test passes, it's because it watched that happen.
-- **The reasoning lives here, in the open — not behind a private API.** The six sibling
+  polled from Appliqation's own authoritative run record, not parsed out of report prose.
+  `run_visual_check`'s verdict comes from a real, code-computed pixel diff the model was shown,
+  never its own read of a screenshot. If Autopilot says a test passes, it's because it watched
+  that happen.
+- **The reasoning lives here, in the open, not behind a private API.** The seven sibling
   agents are genuinely self-contained; the *judgment* about how to combine them is this
   repo's own code, fully readable, forkable, and swappable (see
   [Customizing the policy](#customizing-the-policy)). Nothing about how this agent thinks is
   hidden behind a server only Appliqation can change. One concrete example:
   `appliqation-defect-fix` has no way to know, on its own, how much testing a given fix
-  actually needs verified — that call is genuinely Autopilot's to make, from the broader
+  actually needs verified. That call is genuinely Autopilot's to make, from the broader
   signal (defect history, run context) it's already gathering, and it's required to state
   that reasoning explicitly rather than pass the sibling agent a generic instruction. Same
-  reasoning for `appliqation-heal-selector`: it only ever sees one script and one failure in
-  isolation, with no way to know whether this is a stale-selector case or a real regression —
-  that's Autopilot's call, made before defect-fix is even considered.
+  reasoning for `appliqation-heal-selector` and `appliqation-visual-regression`: each only
+  ever sees one script, or one route, in isolation, with no way to know whether this TC is
+  a stale-selector case, a real regression, or worth checking visually at all. That's
+  Autopilot's call, made before either sibling is even considered.
 - **Raising a pull request is opt-in, not assumed.** `run_pr_raise` isn't even in the tool
-  list Autopilot's model sees unless you pass `--allow-pr`. Without it, Autopilot still
-  reasons about whether a PR would be warranted — it just tells you so instead of doing it.
+  list Autopilot's model sees unless you pass `--allow-pr`. Same for `run_visual_check`:
+  it needs `--visual` plus a `--baseline-environment` name before it's offered at all.
+  Without either, Autopilot still reasons about whether the action would be warranted; it
+  just tells you so instead of doing it.
 
 ## The complete agentic system
 
@@ -73,11 +79,12 @@ flowchart TB
         Policy -.drives.-> Loop
     end
 
-    Ctx["read-only Appliqation context:<br/>get_scenario, get_failure_patterns,<br/>get_defect_context, get_coverage_analysis,<br/>get_automation_readiness, enrich_project_context<br/>(read-only — action=write is refused), ..."]
+    Ctx["read-only Appliqation context:<br/>get_scenario, get_failure_patterns,<br/>get_defect_context, get_coverage_analysis,<br/>get_automation_readiness, enrich_project_context<br/>(read-only, action=write is refused), ..."]
 
     Ctx --> Loop
     Loop -->|"run_judge<br/>(one TC, or one scope-level call)"| Autotest[appliqation-autotest]
     Loop -->|"run_heal<br/>(failed TC + canonical script exists)"| Heal[appliqation-heal-selector]
+    Loop -->|"run_visual_check<br/>(TC tagged visual, only if --visual)"| Visual[appliqation-visual-regression]
     Loop -->|run_defect_fix| DefectFix[appliqation-defect-fix]
     Loop -->|run_generate| Scriptgen[appliqation-scriptgen]
     Loop -->|"run_pr_raise<br/>(only if --allow-pr)"| PrRaise[appliqation-pr-raise]
@@ -85,19 +92,20 @@ flowchart TB
 
     Autotest -->|real polled verdict, per TC or per scope| Loop
     Heal -->|"verified: true/false, or declined: true"| Loop
+    Visual -->|"verdict + real diffPercentage"| Loop
     DefectFix -->|"verified: true/false"| Loop
     Scriptgen -->|"testRun.ok: true/false"| Loop
     PrRaise -->|PR URL or committed: false| Loop
     Explorer -->|"findings report + budgetExceeded"| Loop
 ```
 
-- **Context tools** are ordinary read-only Appliqation MCP tools — the same signal a human QA lead would look at before deciding where to spend effort. This includes the project's own living context document (`enrich_project_context`, action=read) — known issues, high-risk areas, regression watchlist, pain points, personas — so a TC in a known-risky area gets weighed differently than the same raw evidence somewhere unremarkable. The tool also has a write mode; autopilot can only ever read it — see [Safety](#safety).
-- **Action tools** each spawn the corresponding sibling agent's CLI as a real subprocess with `--json`, and hand the model back the exact, real structured result — never a summary of one.
-- **The policy** (`src/policy/systemPrompt.ts`) is the one piece of genuine "brain" — a detailed, phase-based methodology for gathering context, forming a plan, executing it adaptively, and reporting honestly. It's a plain string. Read it, fork it, replace it.
+- **Context tools** are ordinary read-only Appliqation MCP tools: the same signal a human QA lead would look at before deciding where to spend effort. This includes the project's own living context document (`enrich_project_context`, action=read): known issues, high-risk areas, regression watchlist, pain points, personas, so a TC in a known-risky area gets weighed differently than the same raw evidence somewhere unremarkable. The tool also has a write mode; autopilot can only ever read it, see [Safety](#safety).
+- **Action tools** each spawn the corresponding sibling agent's CLI as a real subprocess with `--json`, and hand the model back the exact, real structured result, never a summary of one.
+- **The policy** (`src/policy/systemPrompt.ts`) is the one piece of genuine "brain": a detailed, phase-based methodology for gathering context, forming a plan, executing it adaptively, and reporting honestly. It's a plain string. Read it, fork it, replace it.
 
 ## Workflow options
 
-Autopilot's judgment is one way to use this family — not the only one. Here are four real shapes, from fully autonomous to fully scripted.
+Autopilot's judgment is one way to use this family, not the only one. Here are six real shapes, from fully autonomous to fully scripted.
 
 ### 1. Full autonomous mode
 
@@ -138,7 +146,7 @@ npx appliqation-autopilot run --test-case-uuid <uuid> --environment Stage --repo
 
 ### 2. Deterministic CI pipeline (no orchestrator)
 
-Skip Autopilot entirely and script the individual agents directly — full control, zero LLM judgment about *what* to run, still LLM-verified per step.
+Skip Autopilot entirely and script the individual agents directly: full control, zero LLM judgment about *what* to run, still LLM-verified per step.
 
 ```mermaid
 flowchart LR
@@ -191,7 +199,7 @@ npx appliqation-scriptgen generate --test-case-uuid <uuid> --repo-path <path> --
 
 Point Autopilot at an entire scenario or test set instead of one test case. It leads with a
 single scope-level `run_judge` call to get autotest's own consolidated pass/fail/uncovered
-signal cheaply, then reasons with relative priority across every TC in scope — a failed TC
+signal cheaply, then reasons with relative priority across every TC in scope: a failed TC
 with a canonical script is a healing candidate before it's a defect-fix candidate.
 
 ```mermaid
@@ -223,30 +231,58 @@ npx appliqation-autopilot run --scenario-id <id> --environment Stage --repo-path
 # or: --test-set-id <id>
 ```
 
+### 6. Visual regression check
+
+Authorize `run_visual_check` for a run, and Autopilot will call it for any TC tagged
+`visual` (or with an equally specific stated reason), citing the real route from a run it
+already has evidence for.
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant AP as Autopilot
+    participant AT as Autotest
+    participant VR as Visual-Regression
+
+    You->>AP: run --test-case-uuid X --visual --baseline-environment Prod
+    AP->>AP: gather context, see Tag: visual on this TC
+    AP->>AT: run_judge
+    AT-->>AP: real verdict + a run_id with real evidence
+    AP->>AP: get_execution_evidence on that run_id for the real route
+    AP->>VR: run_visual_check (route, baseline Prod, target Stage)
+    VR-->>AP: verdict: regression / expected-divergence / not-applicable / inconclusive
+    AP-->>You: report citing the real verdict and diffPercentage
+```
+
+```bash
+npx appliqation-autopilot run --test-case-uuid <uuid> --environment Stage --repo-path <path> \
+  --visual --baseline-environment Prod
+```
+
 ## Quick start
 
 ```bash
 npm install -g @appliqation/autopilot
 ```
 
-You'll also need whichever sibling agents autopilot is allowed to call — install the ones
+You'll also need whichever sibling agents autopilot is allowed to call. Install the ones
 you want reachable (see [Workflow options](#workflow-options) above for real combinations;
-you don't need all six for every use case):
+you don't need all seven for every use case):
 
 ```bash
-npm install -g @appliqation/autotest @appliqation/heal-selector @appliqation/defect-fix \
-  @appliqation/scriptgen @appliqation/pr-raise @appliqation/explorer
+npm install -g @appliqation/autotest @appliqation/heal-selector @appliqation/visual-regression \
+  @appliqation/defect-fix @appliqation/scriptgen @appliqation/pr-raise @appliqation/explorer
 ```
 
-Each is a plain command name by default (`AUTOTEST_CMD`/`HEAL_CMD`/`DEFECT_FIX_CMD`/
-`SCRIPTGEN_CMD`/`PR_RAISE_CMD`/`EXPLORER_CMD` in `.env`) — only override these if you're
-pointing at a local development build instead.
+Each is a plain command name by default (`AUTOTEST_CMD`/`HEAL_CMD`/`VISUAL_CMD`/
+`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/`PR_RAISE_CMD`/`EXPLORER_CMD` in `.env`). Only override
+these if you're pointing at a local development build instead.
 
 Create a `.env` file (in whatever directory you'll run it from) with:
 
 ```
 APPQ_API_KEY=your-appliqation-api-key
-ANTHROPIC_API_KEY=your-anthropic-key   # or OPENAI_API_KEY — pick one
+ANTHROPIC_API_KEY=your-anthropic-key   # or OPENAI_API_KEY, pick one
 ```
 
 ```bash
@@ -256,16 +292,17 @@ appliqation-autopilot run \
   --repo-path /path/to/your/checkout
 ```
 
-Watch stderr — every context tool call, every action, and the model's own reasoning
+Watch stderr: every context tool call, every action, and the model's own reasoning
 (`[thinking]` lines) stream live. Add `--allow-pr` once you're ready to let it actually open
-pull requests; add `--json`/`--ci` for a single structured result and a CI-friendly exit code
+pull requests, or `--visual --baseline-environment <name>` to let it check for visual
+regressions; add `--json`/`--ci` for a single structured result and a CI-friendly exit code
 instead of the human-readable transcript.
 
 ## Customizing the policy
 
 The default policy in `src/policy/systemPrompt.ts` is opinionated: don't automate a currently
 failing test, flag flaky results as lower-confidence, treat "no action needed" as a legitimate
-outcome. Your organization might weigh these differently — more conservative, a different
+outcome. Your organization might weigh these differently: more conservative, a different
 priority order, a different report format for your own stakeholders.
 
 You don't need to touch anything else in this repo to change that:
@@ -276,39 +313,43 @@ npx appliqation-autopilot run --policy ./my-policy.md ...
 ```
 
 Anything you put in that file becomes the system prompt driving every decision. The
-orchestration code (`src/orchestrator/`, `src/tools/`) doesn't change — it just runs whatever
+orchestration code (`src/orchestrator/`, `src/tools/`) doesn't change; it just runs whatever
 policy it's given against the same tools.
 
 If what you actually want is full deterministic control with no LLM judgment in the loop at
-all, you don't need Autopilot for that — script `appliqation-autotest`,
-`appliqation-heal-selector`, `appliqation-defect-fix`, `appliqation-scriptgen`, and
-`appliqation-pr-raise` directly; each is a complete, independently useful CLI (see
+all, you don't need Autopilot for that. Script `appliqation-autotest`,
+`appliqation-heal-selector`, `appliqation-visual-regression`, `appliqation-defect-fix`,
+`appliqation-scriptgen`, and `appliqation-pr-raise` directly; each is a complete,
+independently useful CLI (see
 [workflow 2](#2-deterministic-ci-pipeline-no-orchestrator)).
 
 ## Safety
 
-- `run_pr_raise` is excluded from the tool list entirely unless `--allow-pr` is passed —
-  a hardcoded exclusion, not a soft warning the model could talk itself past.
-- Every meta-tool result is the sibling agent's own real `--json` output — including on
+- `run_pr_raise` and `run_visual_check` are excluded from the tool list entirely unless
+  `--allow-pr`/`--visual` is passed: a hardcoded exclusion, not a soft warning the model
+  could talk itself past.
+- Every meta-tool result is the sibling agent's own real `--json` output, including on
   failure (a failed/blocked `run_judge`, an unverified `run_generate`/`run_defect_fix`/
-  `run_heal`), so a bad outcome is visible to the model as data to reason about, never
-  swallowed. A `run_heal` decline is treated the same way — real evidence, not a failure to
-  hide.
-- The individual agents carry their own safety invariants independently — a destructive-action
+  `run_heal`, an inconclusive `run_visual_check`), so a bad outcome is visible to the model
+  as data to reason about, never swallowed. A `run_heal` decline, and a `run_visual_check`
+  `not-applicable`/`expected-divergence` result, are all treated the same way: real
+  evidence, not a failure to hide.
+- The individual agents carry their own safety invariants independently: a destructive-action
   gate on any browser interaction, an allowlisted shell surface for `appliqation-scriptgen`'s
   and `appliqation-defect-fix`'s environment bootstrap, `appliqation-defect-fix`'s own appq
   writes gated behind its own `--dry-run` (which Autopilot can pass through via
   `run_defect_fix`'s `dry_run` argument), no credentials ever flowing through an LLM's own
-  context. Autopilot doesn't weaken any of that; it just decides when to invoke it.
+  context. `appliqation-visual-regression` has no filesystem/shell surface at all. Autopilot
+  doesn't weaken any of that; it just decides when to invoke it.
 - No credentials of any kind pass through the LLM's context at any point in this repo.
 - `enrich_project_context` is a single Appliqation tool with both `action=read` and
-  `action=write` modes — tool-*name* allowlisting alone can't express "this tool, but
+  `action=write` modes. Tool-*name* allowlisting alone can't express "this tool, but
   only this argument value," so `@appliqation/agent-core`'s `createReadOnlyProjectContextDispatcher`
   adds an argument-level gate on top: only `action=read` is ever let through, and the
   check fails closed (a missing or malformed `action` is refused too, not just an
   explicit `"write"`). Shared with `appliqation-explorer`, which needs the identical
   guarantee.
-- `appliqation-explorer` is read-only end to end — including on the project context
+- `appliqation-explorer` is read-only end to end, including on the project context
   document its own upstream workflow (`appq:runman`) would otherwise write to. When that
   workflow runs interactively in Claude Code, a human is present at its confirmation gate
   before anything gets persisted as fact for future passes; a headless `run_explore` call
@@ -318,25 +359,25 @@ all, you don't need Autopilot for that — script `appliqation-autotest`,
 
 **Run this inside a container with an egress allowlist**, same as every sibling it can spawn.
 This process's own direct network need is narrow (your LLM provider and `APPQ_ORIGIN`), but
-`run_judge`/`run_heal`/`run_generate`/`run_defect_fix`/`run_explore`/`run_pr_raise` each spawn
-a sibling agent as a real subprocess, and each of those has its own broader surface — a live
-browser, a real shell, or a real `GITHUB_TOKEN` — documented in that sibling's own README
-under "Running this safely." Containing this process alone isn't sufficient; contain the whole
-tree it can spawn.
+`run_judge`/`run_heal`/`run_visual_check`/`run_generate`/`run_defect_fix`/`run_explore`/
+`run_pr_raise` each spawn a sibling agent as a real subprocess, and each of those has its own
+broader surface: a live browser, a real shell, or a real `GITHUB_TOKEN`, documented in that
+sibling's own README under "Running this safely." Containing this process alone isn't
+sufficient; contain the whole tree it can spawn.
 
 ## Configuration
 
 See `.env.example` for the full list. In short: `APPQ_API_KEY` + one LLM provider key are
-required; `AUTOTEST_CMD`/`HEAL_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/`PR_RAISE_CMD`/
-`EXPLORER_CMD` tell Autopilot how to reach the sibling agents; `BUDGET_MAX_*` caps the
-tool-calling loop; `POLICY_FILE` points at a custom policy.
+required; `AUTOTEST_CMD`/`HEAL_CMD`/`VISUAL_CMD`/`DEFECT_FIX_CMD`/`SCRIPTGEN_CMD`/
+`PR_RAISE_CMD`/`EXPLORER_CMD` tell Autopilot how to reach the sibling agents; `BUDGET_MAX_*`
+caps the tool-calling loop; `POLICY_FILE` points at a custom policy.
 
 Optionally, `AUDIT_MONGO_URI`/`AUDIT_MONGO_DB`/`AUDIT_MONGO_COLLECTION` or
 `AUDIT_JSONL_PATH` records one audit entry per invocation (token usage, duration, real
-outcome) to a datastore this agent family owns — deliberately not part of Appliqation
+outcome) to a datastore this agent family owns, deliberately not part of Appliqation
 itself, since this is a parallel system that uses it, not a feature of it. Every sibling
 agent in the family writes to the same shape; [`appliqation-dashboard`](https://github.com/appliqation/dashboard)
-reads it back as an aggregated report. Entirely opt-in — nothing is recorded unless one
+reads it back as an aggregated report. Entirely opt-in: nothing is recorded unless one
 of these is set, and a write failure never affects a real run's outcome.
 
 ## Development
@@ -355,4 +396,4 @@ See `CLAUDE.md` for a map of this repo if you're working in it with an AI coding
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).

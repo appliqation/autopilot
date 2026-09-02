@@ -57,8 +57,10 @@ function baseOpts() {
       defectFixCmd: 'appliqation-defect-fix',
       explorerCmd: 'appliqation-explorer',
       healCmd: 'appliqation-heal-selector',
+      visualCmd: 'appliqation-visual-regression',
       commandTimeoutMs: 30_000,
       allowPr: false,
+      allowVisual: false,
     },
   };
 }
@@ -102,12 +104,34 @@ describe('autopilot', () => {
     expect(call2.system).toContain('is NOT available for this invocation');
   });
 
+  it('the default policy text reflects visual-check authorization state', async () => {
+    await autopilot({ ...baseOpts(), metaTools: { ...baseOpts().metaTools, allowVisual: true } });
+    const call = mockRunLoop.mock.calls[0][0];
+    expect(call.system).toContain('`run_visual_check` is available for this invocation');
+
+    mockRunLoop.mockClear();
+    await autopilot({ ...baseOpts(), metaTools: { ...baseOpts().metaTools, allowVisual: false } });
+    const call2 = mockRunLoop.mock.calls[0][0];
+    expect(call2.system).toContain('`run_visual_check` is NOT available for this invocation');
+  });
+
   it('the seed message includes the test case, environment, and repo path', async () => {
     await autopilot(baseOpts());
     const call = mockRunLoop.mock.calls[0][0];
     expect(call.seedMessage).toContain('2424-abc');
     expect(call.seedMessage).toContain('Stage');
     expect(call.seedMessage).toContain('/repo');
+  });
+
+  it('the seed message states the baseline environment only when given', async () => {
+    await autopilot({ ...baseOpts(), baselineEnvironment: 'Prod' });
+    const call = mockRunLoop.mock.calls[0][0];
+    expect(call.seedMessage).toContain('Prod');
+
+    mockRunLoop.mockClear();
+    await autopilot(baseOpts());
+    const call2 = mockRunLoop.mock.calls[0][0];
+    expect(call2.seedMessage).not.toContain('Baseline');
   });
 
   it('single-TC scope: seed message tells the model to start with get_scenario', async () => {

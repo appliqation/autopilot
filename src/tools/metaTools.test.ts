@@ -25,8 +25,10 @@ const baseCfg = {
   defectFixCmd: 'appliqation-defect-fix',
   explorerCmd: 'appliqation-explorer',
   healCmd: 'appliqation-heal-selector',
+  visualCmd: 'appliqation-visual-regression',
   commandTimeoutMs: 30_000,
   allowPr: false,
+  allowVisual: false,
 };
 
 describe('parseCommand', () => {
@@ -102,6 +104,22 @@ describe('metaToolDefs', () => {
   it('includes run_pr_raise when allowPr is true', () => {
     const names = metaToolDefs({ ...baseCfg, allowPr: true }).map((t) => t.name);
     expect(names).toContain('run_pr_raise');
+  });
+
+  it('excludes run_visual_check entirely when allowVisual is false, not offered, not just soft-blocked', () => {
+    const names = metaToolDefs({ ...baseCfg, allowVisual: false }).map((t) => t.name);
+    expect(names).not.toContain('run_visual_check');
+  });
+
+  it('includes run_visual_check when allowVisual is true, with its full required schema', () => {
+    const def = metaToolDefs({ ...baseCfg, allowVisual: true }).find((t) => t.name === 'run_visual_check')!;
+    expect(def).toBeDefined();
+    expect((def.inputSchema as { required: string[] }).required).toEqual([
+      'test_case_uuid',
+      'route',
+      'baseline_environment',
+      'target_environment',
+    ]);
   });
 });
 
@@ -442,6 +460,96 @@ describe('createMetaToolDispatch', () => {
       await dispatch('run_pr_raise', { project_id: 1, repo_path: '/repo', branch_name: 'x', pr_title: 'y' });
       const callArgs = mockExecFile.mock.calls[0][1] as string[];
       expect(callArgs).not.toContain('--pr-body');
+    });
+  });
+
+  describe('run_visual_check', () => {
+    it('is refused with a clear message when allowVisual is false, without ever spawning a process', async () => {
+      const dispatch = createMetaToolDispatch({ ...baseCfg, allowVisual: false });
+      const result = await dispatch('run_visual_check', {
+        test_case_uuid: 'tc-1',
+        route: '/subscribe',
+        baseline_environment: 'Prod',
+        target_environment: 'Stage',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.text).toMatch(/not authorized/);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it('spawns the configured visual-regression command with check + args + --json when authorized', async () => {
+      mockSuccess('{"verdict":"regression","diffPercentage":0.33,"primaryFinding":"button missing"}');
+      const dispatch = createMetaToolDispatch({ ...baseCfg, allowVisual: true });
+      const result = await dispatch('run_visual_check', {
+        test_case_uuid: 'tc-1',
+        route: '/subscribe',
+        baseline_environment: 'Prod',
+        target_environment: 'Stage',
+      });
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'appliqation-visual-regression',
+        [
+          'check',
+          '--test-case-uuid',
+          'tc-1',
+          '--route',
+          '/subscribe',
+          '--baseline-environment',
+          'Prod',
+          '--target-environment',
+          'Stage',
+          '--json',
+        ],
+        expect.anything(),
+        expect.any(Function),
+      );
+      expect(result.ok).toBe(true);
+      expect(JSON.parse(result.text)).toMatchObject({ verdict: 'regression' });
+    });
+
+    it('passes one --mask per entry in a multi-value mask array', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch({ ...baseCfg, allowVisual: true });
+      await dispatch('run_visual_check', {
+        test_case_uuid: 'tc-1',
+        route: '/subscribe',
+        baseline_environment: 'Prod',
+        target_environment: 'Stage',
+        mask: ['.reader-count', '[data-testid=timestamp]'],
+      });
+      const callArgs = mockExecFile.mock.calls[0][1] as string[];
+      expect(callArgs.filter((a) => a === '--mask')).toHaveLength(2);
+      expect(callArgs).toContain('.reader-count');
+      expect(callArgs).toContain('[data-testid=timestamp]');
+    });
+
+    it('includes --storage-state only when given', async () => {
+      mockSuccess('{}');
+      const dispatch = createMetaToolDispatch({ ...baseCfg, allowVisual: true });
+      await dispatch('run_visual_check', {
+        test_case_uuid: 'tc-1',
+        route: '/subscribe',
+        baseline_environment: 'Prod',
+        target_environment: 'Stage',
+        storage_state: '/tmp/auth.json',
+      });
+      const callArgs = mockExecFile.mock.calls[0][1] as string[];
+      expect(callArgs).toContain('--storage-state');
+      expect(callArgs).toContain('/tmp/auth.json');
+    });
+
+    it('recovers the real --json summary from stdout even when the CLI exits non-zero (a regression or inconclusive verdict)', async () => {
+      mockFailure(1, '{"verdict":"regression","diffPercentage":0.33}');
+      const dispatch = createMetaToolDispatch({ ...baseCfg, allowVisual: true });
+      const result = await dispatch('run_visual_check', {
+        test_case_uuid: 'tc-1',
+        route: '/subscribe',
+        baseline_environment: 'Prod',
+        target_environment: 'Stage',
+      });
+      expect(result.ok).toBe(false);
+      expect(JSON.parse(result.text)).toMatchObject({ verdict: 'regression' });
     });
   });
 

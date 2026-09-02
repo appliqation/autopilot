@@ -21,11 +21,11 @@ export const config = {
     maxPages: 999_999, // this agent never drives a browser directly
     maxMillis: Number(optional('BUDGET_MAX_MILLIS') ?? 30 * 60 * 1000),
     maxTurns: Number(optional('BUDGET_MAX_TURNS') ?? 30),
-    // A broad backstop against runaway spend, not a tuned budget — the other
+    // A broad backstop against runaway spend, not a tuned budget: the other
     // caps above are what normally end a run first. Includes cache tokens.
     maxTotalTokens: Number(optional('BUDGET_MAX_TOTAL_TOKENS') ?? 2_000_000),
   },
-  // How to invoke the six sibling agents — never a filesystem/private-npm
+  // How to invoke the seven sibling agents. Never a filesystem/private-npm
   // dependency (this repo is meant to be cloned standalone), just a command
   // string split on whitespace into [command, ...baseArgs]. Defaults assume
   // the real packages are installed and on PATH; override to point at a
@@ -36,6 +36,7 @@ export const config = {
   defectFixCmd: optional('DEFECT_FIX_CMD') ?? 'appliqation-defect-fix',
   explorerCmd: optional('EXPLORER_CMD') ?? 'appliqation-explorer',
   healCmd: optional('HEAL_CMD') ?? 'appliqation-heal-selector',
+  visualCmd: optional('VISUAL_CMD') ?? 'appliqation-visual-regression',
   commandTimeoutMs: Number(optional('COMMAND_TIMEOUT_MS') ?? 20 * 60 * 1000),
   // The one real customization point — see src/policy/systemPrompt.ts.
   policyFile: optional('POLICY_FILE'),
