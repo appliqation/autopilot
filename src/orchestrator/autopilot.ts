@@ -7,11 +7,37 @@
 // appq-fetch indirection, which has nothing to fetch here.
 
 import { runLoop, fetchAppqToolDefs, createGatedAppqDispatcher, createReadOnlyProjectContextDispatcher, PROJECT_CONTEXT_TOOL } from '@appliqation/agent-core';
-import type { McpClient, ProviderAdapter, RunBudget, ToolDispatcher, LoopResult } from '@appliqation/agent-core';
+import type { McpClient, ProviderAdapter, RunBudget, ToolDispatcher, ToolResult, LoopResult } from '@appliqation/agent-core';
 import { READONLY_CONTEXT_TOOLS } from '../tools/safety.js';
 import { metaToolDefs, createMetaToolDispatch } from '../tools/metaTools.js';
 import type { MetaToolsConfig } from '../tools/metaTools.js';
 import { buildSystemPrompt } from '../policy/systemPrompt.js';
+
+// Real-world safety net, not the fix: appq's own enrich_project_context has
+// had a real bug (a "living context document" that grew to 1.27M characters
+// for one real project via an unrelated merge-append defect, fixed at the
+// source separately) blow past a whole LLM provider's context window in one
+// tool result. No single context tool result should ever be able to end an
+// autopilot session by itself. This is a generous ceiling (comfortably
+// above the ~1500-2000 token budget enrich_project_context's own document is
+// actually meant to stay under), not a tuned limit; it exists purely so a
+// future oversized payload, from this field or any other, degrades to a
+// truncated-but-usable result instead of a hard failure.
+const CONTEXT_TOOL_RESULT_CHAR_CAP = 50_000;
+
+function capOversizedResult(name: string, result: ToolResult): ToolResult {
+  if (name !== 'enrich_project_context' || result.text.length <= CONTEXT_TOOL_RESULT_CHAR_CAP) {
+    return result;
+  }
+  const originalLength = result.text.length;
+  return {
+    ...result,
+    text:
+      result.text.slice(0, CONTEXT_TOOL_RESULT_CHAR_CAP) +
+      `\n\n[TRUNCATED: original response was ${originalLength} characters, cut to ${CONTEXT_TOOL_RESULT_CHAR_CAP}. ` +
+      'This is unusually large for this tool; treat the data above as partial, not the full document.]',
+  };
+}
 
 export interface AutopilotOptions {
   client: McpClient;
@@ -70,7 +96,7 @@ export async function autopilot(opts: AutopilotOptions): Promise<LoopResult> {
 
   const dispatch: ToolDispatcher = async (name, args) => {
     if (metaNames.has(name)) return metaDispatch(name, args);
-    return gatedAppq(name, args);
+    return capOversizedResult(name, await gatedAppq(name, args));
   };
 
   const system = opts.systemPromptOverride ?? buildSystemPrompt(opts.metaTools.allowPr, opts.metaTools.allowVisual);

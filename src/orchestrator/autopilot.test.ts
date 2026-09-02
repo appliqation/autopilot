@@ -222,6 +222,39 @@ describe('autopilot', () => {
     expect(result.text).toMatch(/read-only/);
   });
 
+  it('truncates an oversized enrich_project_context result rather than passing the whole thing through', async () => {
+    const huge = 'x'.repeat(60_000);
+    const gatedInner = vi.fn().mockResolvedValue({ ok: true, text: huge });
+    mockCreateGatedAppqDispatcher.mockReturnValue(gatedInner);
+    await autopilot(baseOpts());
+    const dispatch = mockRunLoop.mock.calls[0][0].dispatch;
+
+    const result = await dispatch('enrich_project_context', { project_id: 1349, action: 'read' });
+    expect(result.text.length).toBeLessThan(huge.length);
+    expect(result.text).toContain('[TRUNCATED: original response was 60000 characters');
+  });
+
+  it('leaves a normal-sized enrich_project_context result unchanged', async () => {
+    const gatedInner = vi.fn().mockResolvedValue({ ok: true, text: 'normal-sized project context' });
+    mockCreateGatedAppqDispatcher.mockReturnValue(gatedInner);
+    await autopilot(baseOpts());
+    const dispatch = mockRunLoop.mock.calls[0][0].dispatch;
+
+    const result = await dispatch('enrich_project_context', { project_id: 1349, action: 'read' });
+    expect(result.text).toBe('normal-sized project context');
+  });
+
+  it('never truncates a large result from any other tool, only enrich_project_context', async () => {
+    const huge = 'x'.repeat(60_000);
+    const gatedInner = vi.fn().mockResolvedValue({ ok: true, text: huge });
+    mockCreateGatedAppqDispatcher.mockReturnValue(gatedInner);
+    await autopilot(baseOpts());
+    const dispatch = mockRunLoop.mock.calls[0][0].dispatch;
+
+    const result = await dispatch('get_scenario', { scenario_id: 2424 });
+    expect(result.text).toBe(huge);
+  });
+
   it('passes the given budget through unchanged', async () => {
     const customBudget: RunBudget = { maxCalls: 5, maxPages: 999_999, maxMillis: 1000, maxTurns: 2 };
     await autopilot({ ...baseOpts(), budget: customBudget });
