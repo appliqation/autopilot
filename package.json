@@ -1,6 +1,6 @@
 {
   "name": "@appliqation/autopilot",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "An agentic orchestrator that decides, per test case (or an entire scenario/test set), whether to run autonomous testing, heal a stale selector, fix a defect, generate new automation, or raise a pull request for it — reasoning over real signal (current pass/fail state, flakiness, linked defects, coverage priority), not a fixed script. Reasoning lives entirely in this repo, not a private server.",
   "license": "MIT",
   "repository": {
@@ -32,7 +32,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@appliqation/agent-core": "^0.1.5",
+    "@appliqation/agent-core": "^0.1.7",
     "commander": "^13.1.0",
     "dotenv": "^16.4.7"
   },
