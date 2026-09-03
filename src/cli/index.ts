@@ -7,7 +7,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
-import { createMcpClient, createAnthropicAdapter, createOpenAiAdapter, createUsageAccumulator } from '@appliqation/agent-core';
+import { createMcpClient, createAnthropicAdapter, createOpenAiAdapter, createOpenAiCompatibleAdapter, createUsageAccumulator } from '@appliqation/agent-core';
 import type { ProviderAdapter, LoopResult } from '@appliqation/agent-core';
 import { config, resolveProvider, resolveModel } from '../config/env.js';
 import { autopilot } from '../orchestrator/autopilot.js';
@@ -16,9 +16,12 @@ import { recordAutopilotRun } from './audit.js';
 function buildAdapter(): ProviderAdapter {
   const provider = resolveProvider();
   const model = resolveModel();
-  return provider === 'anthropic'
-    ? createAnthropicAdapter(config.anthropicApiKey!, model, config.anthropicMaxTokens)
-    : createOpenAiAdapter(config.openaiApiKey!, model, config.openaiMaxOutputTokens);
+  if (provider === 'anthropic') return createAnthropicAdapter(config.anthropicApiKey!, model, config.anthropicMaxTokens);
+  if (provider === 'openai') return createOpenAiAdapter(config.openaiApiKey!, model, config.openaiMaxOutputTokens);
+  if (provider === 'deepseek') {
+    return createOpenAiCompatibleAdapter({ apiKey: config.deepseekApiKey!, baseURL: config.deepseekBaseUrl, model, maxTokens: config.deepseekMaxTokens, providerLabel: 'DeepSeek' });
+  }
+  return createOpenAiCompatibleAdapter({ apiKey: config.glmApiKey!, baseURL: config.glmBaseUrl, model, maxTokens: config.glmMaxTokens, providerLabel: 'GLM' });
 }
 
 function logEvent(prefix: string) {
