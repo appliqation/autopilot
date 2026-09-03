@@ -1,11 +1,12 @@
-// Wraps the five sibling agents (appliqation-autotest, appliqation-scriptgen,
-// appliqation-defect-fix, appliqation-pr-raise, appliqation-explorer) as ordinary
-// LLM-callable tools. Never a filesystem or
-// private-npm dependency — each is invoked as a configured command string
-// (see src/config/env.ts), spawned via child_process.execFile with an
-// explicit argv array (never a shell string), consuming the CLI's own
-// --json output. The model sees the REAL structured result every time —
-// verified/testRun.ok/a real PR URL — never a paraphrase of one.
+// Wraps the seven sibling agents (appliqation-autotest, appliqation-scriptgen,
+// appliqation-defect-fix, appliqation-pr-raise, appliqation-explorer,
+// appliqation-heal-selector, appliqation-visual-regression) as ordinary
+// LLM-callable tools. Never a filesystem or private-npm dependency: each is
+// invoked as a configured command string (see src/config/env.ts), spawned
+// via child_process.execFile with an explicit argv array (never a shell
+// string), consuming the CLI's own --json output. The model sees the REAL
+// structured result every time (verified/testRun.ok/a real PR URL/a real
+// verdict), never a paraphrase of one.
 
 import { execFile } from 'node:child_process';
 import type { LlmToolDef, ToolResult } from '@appliqation/agent-core';
@@ -57,9 +58,12 @@ export interface MetaToolsConfig {
   defectFixCmd: string;
   explorerCmd: string;
   healCmd: string;
+  visualCmd: string;
   commandTimeoutMs: number;
   /** Whether run_pr_raise is even offered — see metaToolDefs(). */
   allowPr: boolean;
+  /** Whether run_visual_check is even offered — see metaToolDefs(). */
+  allowVisual: boolean;
 }
 
 export function metaToolDefs(cfg: MetaToolsConfig): LlmToolDef[] {
@@ -216,6 +220,34 @@ export function metaToolDefs(cfg: MetaToolsConfig): LlmToolDef[] {
     });
   }
 
+  // Same hardcoded-exclusion discipline as run_pr_raise above, not a soft
+  // suggestion. If --visual wasn't passed, this tool simply isn't in the
+  // list the model ever sees.
+  if (cfg.allowVisual) {
+    defs.push({
+      name: 'run_visual_check',
+      description:
+        'Check ONE route for a real visual regression by diffing it against its own live production ' +
+        "counterpart. Only call this for a test case tagged \"visual\" (or with an equally specific, stated " +
+        'reason drawn from your own gathered context), never routinely, same discipline as run_explore. Get ' +
+        'the real route from get_execution_evidence on a run_id you already have (never guess a URL from step ' +
+        'text). Cite the real verdict/diffPercentage/primaryFinding it returns, never your own read of a ' +
+        'screenshot you have not actually seen through this tool.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          test_case_uuid: { type: 'string' },
+          route: { type: 'string', description: 'The route to check, e.g. /subscribe: the same real route on both environments.' },
+          baseline_environment: { type: 'string', description: 'Production/baseline environment name, from your seed context.' },
+          target_environment: { type: 'string', description: 'The environment name being checked against the baseline.' },
+          mask: { type: 'array', items: { type: 'string' }, description: 'Optional CSS selectors for known dynamic regions (counts, timestamps) to reduce noise.' },
+          storage_state: { type: 'string', description: 'Optional Playwright storageState file path, for auth-gated routes.' },
+        },
+        required: ['test_case_uuid', 'route', 'baseline_environment', 'target_environment'],
+      },
+    });
+  }
+
   return defs;
 }
 
@@ -311,6 +343,26 @@ export function createMetaToolDispatch(cfg: MetaToolsConfig) {
         ];
         if (args.pr_body) cliArgs.push('--pr-body', String(args.pr_body));
         return runCliJson(cfg.prRaiseCmd, 'raise', cliArgs, cfg.commandTimeoutMs);
+      }
+      case 'run_visual_check': {
+        if (!cfg.allowVisual) {
+          return { ok: false, text: 'run_visual_check is not authorized for this invocation (--visual was not set on appliqation-autopilot).' };
+        }
+        const cliArgs = [
+          '--test-case-uuid',
+          String(args.test_case_uuid),
+          '--route',
+          String(args.route),
+          '--baseline-environment',
+          String(args.baseline_environment),
+          '--target-environment',
+          String(args.target_environment),
+        ];
+        if (Array.isArray(args.mask)) {
+          for (const m of args.mask) cliArgs.push('--mask', String(m));
+        }
+        if (args.storage_state) cliArgs.push('--storage-state', String(args.storage_state));
+        return runCliJson(cfg.visualCmd, 'check', cliArgs, cfg.commandTimeoutMs);
       }
       default:
         return { ok: false, text: `Unknown meta tool "${name}"` };
