@@ -292,6 +292,12 @@ appliqation-autopilot run \
   --repo-path /path/to/your/checkout
 ```
 
+`--test-case-uuid` is one test case. Swap it for `--scenario-id <id>` to route an entire
+scenario, or `--test-set-id <id>` to route an entire test set (can span multiple scenarios —
+the common regression/sanity/smoke shape) — exactly one of the three is required, they're
+mutually exclusive scopes. See [Workflow option 5](#5-scenariotest-set-triage) for the
+scenario/test-set shape in context.
+
 Watch stderr: every context tool call, every action, and the model's own reasoning
 (`[thinking]` lines) stream live. Add `--allow-pr` once you're ready to let it actually open
 pull requests, or `--visual --baseline-environment <name>` to let it check for visual
