@@ -21,16 +21,35 @@ function buildAdapter(): ProviderAdapter {
     : createOpenAiAdapter(config.openaiApiKey!, model, config.openaiMaxOutputTokens);
 }
 
-function logEvent(prefix: string) {
+// A thrown-exception dispatch failure (loop.ts's own catch block, e.g. the
+// destructive-action gate or a stage's tool allowlist) always stamps this
+// exact prefix — see @appliqation/agent-core's engine/loop.ts. Matching on
+// it is a real signal, not a guess: it's the one marker every such failure
+// already carries today. A tool that returns {ok: false} without throwing
+// (e.g. a meta-tool reporting "declined"/"blocked") isn't caught by this —
+// that's real information for the model to react to, not a progress-log
+// failure, so it deliberately stays unmarked here.
+const TOOL_ERROR_PREFIX = 'Tool error:';
+
+/** [+12s] style prefix so a long gap between lines reads as "still running", not "frozen". */
+function elapsed(startedAt: number): string {
+  const s = Math.round((Date.now() - startedAt) / 1000);
+  return `[+${s}s]`.padEnd(7);
+}
+
+function logEvent(prefix: string, startedAt: number) {
   return (e: { type: string; detail?: unknown }) => {
+    const time = elapsed(startedAt);
     if (e.type === 'assistant') {
       const text = ((e.detail as string) ?? '').trim();
-      if (text) console.error(`${prefix}[thinking] ${text}`);
+      if (text) console.error(`${time} ${prefix}[thinking] ${text}`);
     } else if (e.type === 'tool') {
       const d = e.detail as { name: string; result: string };
-      console.error(`${prefix}[tool] ${d.name} -> ${d.result.slice(0, 400)}`);
+      const failed = d.result.startsWith(TOOL_ERROR_PREFIX);
+      const mark = failed ? '✗' : '✓';
+      console.error(`${time} ${mark} ${prefix}[tool] ${d.name} -> ${d.result.slice(0, 400)}`);
     } else if (e.type === 'log') {
-      console.error(`${prefix}[log] ${e.detail}`);
+      console.error(`${time} ${prefix}[log] ${e.detail}`);
     } else if (e.type === 'usage') {
       const u = e.detail as { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number };
       const cacheNote = u.cacheReadTokens
@@ -38,7 +57,7 @@ function logEvent(prefix: string) {
         : u.cacheWriteTokens
           ? ` (${u.cacheWriteTokens} written to cache)`
           : '';
-      console.error(`${prefix}[usage] in=${u.inputTokens} out=${u.outputTokens}${cacheNote}`);
+      console.error(`${time} ${prefix}[usage] in=${u.inputTokens} out=${u.outputTokens}${cacheNote}`);
     }
   };
 }
@@ -143,7 +162,7 @@ program
 
       const startedAt = Date.now();
       const usage = createUsageAccumulator();
-      const baseLog = logEvent('');
+      const baseLog = logEvent('', startedAt);
       let result: LoopResult | undefined;
       try {
         result = await autopilot({
