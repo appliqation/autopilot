@@ -12,6 +12,7 @@ import type { ProviderAdapter, LoopResult } from '@appliqation/agent-core';
 import { config, resolveProvider, resolveModel } from '../config/env.js';
 import { autopilot } from '../orchestrator/autopilot.js';
 import { recordAutopilotRun } from './audit.js';
+import { ActionSummaryCollector, type ScopeResult, type MetaToolAction } from './actionSummary.js';
 
 function buildAdapter(): ProviderAdapter {
   const provider = resolveProvider();
@@ -24,16 +25,35 @@ function buildAdapter(): ProviderAdapter {
   return createOpenAiCompatibleAdapter({ apiKey: config.glmApiKey!, baseURL: config.glmBaseUrl, model, maxTokens: config.glmMaxTokens, providerLabel: 'GLM' });
 }
 
-function logEvent(prefix: string) {
+// A thrown-exception dispatch failure (loop.ts's own catch block, e.g. the
+// destructive-action gate or a stage's tool allowlist) always stamps this
+// exact prefix — see @appliqation/agent-core's engine/loop.ts. Matching on
+// it is a real signal, not a guess: it's the one marker every such failure
+// already carries today. A tool that returns {ok: false} without throwing
+// (e.g. a meta-tool reporting "declined"/"blocked") isn't caught by this —
+// that's real information for the model to react to, not a progress-log
+// failure, so it deliberately stays unmarked here.
+const TOOL_ERROR_PREFIX = 'Tool error:';
+
+/** [+12s] style prefix so a long gap between lines reads as "still running", not "frozen". */
+function elapsed(startedAt: number): string {
+  const s = Math.round((Date.now() - startedAt) / 1000);
+  return `[+${s}s]`.padEnd(7);
+}
+
+function logEvent(prefix: string, startedAt: number) {
   return (e: { type: string; detail?: unknown }) => {
+    const time = elapsed(startedAt);
     if (e.type === 'assistant') {
       const text = ((e.detail as string) ?? '').trim();
-      if (text) console.error(`${prefix}[thinking] ${text}`);
+      if (text) console.error(`${time} ${prefix}[thinking] ${text}`);
     } else if (e.type === 'tool') {
       const d = e.detail as { name: string; result: string };
-      console.error(`${prefix}[tool] ${d.name} -> ${d.result.slice(0, 400)}`);
+      const failed = d.result.startsWith(TOOL_ERROR_PREFIX);
+      const mark = failed ? '✗' : '✓';
+      console.error(`${time} ${mark} ${prefix}[tool] ${d.name} -> ${d.result.slice(0, 400)}`);
     } else if (e.type === 'log') {
-      console.error(`${prefix}[log] ${e.detail}`);
+      console.error(`${time} ${prefix}[log] ${e.detail}`);
     } else if (e.type === 'usage') {
       const u = e.detail as { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number };
       const cacheNote = u.cacheReadTokens
@@ -41,9 +61,44 @@ function logEvent(prefix: string) {
         : u.cacheWriteTokens
           ? ` (${u.cacheWriteTokens} written to cache)`
           : '';
-      console.error(`${prefix}[usage] in=${u.inputTokens} out=${u.outputTokens}${cacheNote}`);
+      console.error(`${time} ${prefix}[usage] in=${u.inputTokens} out=${u.outputTokens}${cacheNote}`);
     }
   };
+}
+
+/** Compact one-line description of a meta-tool action's real result, for the terminal recap. */
+function describeAction(a: MetaToolAction): string {
+  if (!a.ok) return `${a.tool}: failed (${(a.rawText ?? '').slice(0, 80)})`;
+  const r = (a.result ?? {}) as Record<string, unknown>;
+  if (a.tool === 'run_judge') return 'run_judge';
+  if (typeof r.declined === 'boolean' && r.declined) return `${a.tool}: declined`;
+  if (typeof r.verdict === 'string') return `${a.tool}: ${r.verdict}`;
+  if (typeof r.verified === 'boolean') return `${a.tool}: ${r.verified ? 'verified' : 'written, NOT verified'}`;
+  if (a.tool === 'run_pr_raise') {
+    const pr = r.pr as { url?: string } | null | undefined;
+    return pr?.url ? `run_pr_raise: ${pr.url}` : 'run_pr_raise: no PR';
+  }
+  return `${a.tool}: done`;
+}
+
+/** Scannable recap printed before the full prose report — real fields, not narration. */
+function printSummaryRecap(opts: { testCaseUuid?: string; scenarioId?: string; testSetId?: string }, scopeResults: ScopeResult[] | undefined, actions: MetaToolAction[]): void {
+  const scopeLabel = opts.testSetId ? `test set ${opts.testSetId}` : opts.scenarioId ? `scenario ${opts.scenarioId}` : `test case ${opts.testCaseUuid}`;
+  console.log(`\n=== Summary — ${scopeLabel} ===`);
+  if (scopeResults) {
+    const passCount = scopeResults.filter((r) => r.status === 'pass').length;
+    console.log(`Scope: ${passCount}/${scopeResults.length} passing`);
+  }
+  const byTool = new Map<string, number>();
+  for (const a of actions) byTool.set(a.tool, (byTool.get(a.tool) ?? 0) + 1);
+  console.log(`Actions taken: ${actions.length === 0 ? 'none' : [...byTool.entries()].map(([tool, count]) => `${tool} (${count})`).join(', ')}`);
+
+  if (!scopeResults) return;
+  for (const r of scopeResults) {
+    const related = actions.filter((a) => a.tool !== 'run_judge' && JSON.stringify(a.args).includes(r.testCaseUuid));
+    const note = related.length > 0 ? related.map(describeAction).join('; ') : 'no action';
+    console.log(`  ${r.testCaseUuid.padEnd(38)} ${r.status.padEnd(6)} (${r.path.padEnd(24)}) ${note}`);
+  }
 }
 
 const program = new Command();
@@ -146,7 +201,8 @@ program
 
       const startedAt = Date.now();
       const usage = createUsageAccumulator();
-      const baseLog = logEvent('');
+      const baseLog = logEvent('', startedAt);
+      const actionSummary = new ActionSummaryCollector();
       let result: LoopResult | undefined;
       try {
         result = await autopilot({
@@ -175,6 +231,7 @@ program
           systemPromptOverride,
           onEvent: (e) => {
             baseLog(e);
+            actionSummary.observe(e);
             if (e.type === 'usage') usage.onUsage(e.detail as { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number });
           },
         });
@@ -198,14 +255,18 @@ program
           allowPr,
           allowVisual,
           result,
+          actionSummary: actionSummary.build(),
         });
       }
 
+      const { actions, scopeResults } = actionSummary.build();
+
       if (json) {
-        console.log(JSON.stringify({ report: result.report, turns: result.turns, budgetExceeded: result.budgetExceeded }, null, 2));
+        console.log(JSON.stringify({ testCaseUuid: opts.testCaseUuid, scenarioId: opts.scenarioId, testSetId: opts.testSetId, scopeResults, actions, report: result.report, turns: result.turns, budgetExceeded: result.budgetExceeded }, null, 2));
         return;
       }
-      console.log('\n=== Report ===\n');
+      printSummaryRecap(opts, scopeResults, actions);
+      console.log('\n=== Full Report ===\n');
       console.log(result.report);
       console.error(`\n(${result.turns} turns, budget exceeded: ${result.budgetExceeded})`);
     },

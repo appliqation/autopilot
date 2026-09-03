@@ -10,6 +10,7 @@
 
 export const READONLY_CONTEXT_TOOLS = new Set([
   'get_scenario',
+  'get_test_set',
   'get_automation_readiness',
   'get_failure_patterns',
   'get_defect_context',
