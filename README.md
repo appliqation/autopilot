@@ -304,6 +304,38 @@ pull requests, or `--visual --baseline-environment <name>` to let it check for v
 regressions; add `--json`/`--ci` for a single structured result and a CI-friendly exit code
 instead of the human-readable transcript.
 
+## CLI reference
+
+`appliqation-autopilot run [options]`
+
+**Scope — exactly one required:**
+
+| Option | Description |
+|---|---|
+| `--test-case-uuid <uuid>` | One test case to route. |
+| `--scenario-id <id>` | An entire scenario to route: richer context, and Phase 1 gets paid for once instead of once per TC. |
+| `--test-set-id <id>` | An entire test set to route (can span multiple scenarios, the common regression/sanity/smoke shape). |
+
+**Required:**
+
+| Option | Description |
+|---|---|
+| `--environment <name>` | Environment name, passed to `run_judge`/`run_generate`. |
+| `--repo-path <path>` | Local repo checkout `run_generate`/`run_pr_raise`/`run_heal` operate in. |
+
+**Optional:**
+
+| Option | Description |
+|---|---|
+| `--defect-id <id>` | The specific defect that triggered this run, when the caller already resolved one. Without it, Phase 1 only discovers a linked defect incidentally; passing it makes the defect/TC mismatch check actually check against the real triggering defect. |
+| `--allow-pr` | Authorize `run_pr_raise` — without this flag, that tool is not even offered to the model. |
+| `--visual` | Authorize `run_visual_check` — without this flag, that tool is not even offered to the model. Requires `--baseline-environment`. |
+| `--baseline-environment <name>` | Production/baseline environment name for `run_visual_check`, required together with `--visual`. |
+| `--policy <path>` | Override the bundled decision policy with your own system prompt file. |
+| `--max-turns <n>` | Override `BUDGET_MAX_TURNS` for this run. |
+| `--json` | Print a single structured JSON result instead of the human-readable report. |
+| `--ci` | Shorthand for `--json`. |
+
 ## Customizing the policy
 
 The default policy in `src/policy/systemPrompt.ts` is opinionated: don't automate a currently
